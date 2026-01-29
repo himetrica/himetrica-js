@@ -11,7 +11,7 @@ export class HimetricaClient {
   private currentPageViewId: string | null = null;
   private pageViewStartTime = 0;
   private cleanupErrors: (() => void) | null = null;
-
+  // init
   constructor(userConfig: HimetricaConfig) {
     this.config = resolveConfig(userConfig);
 
@@ -56,11 +56,7 @@ export class HimetricaClient {
       screenHeight: window.screen.height,
     };
 
-    sendPost(
-      `${this.config.apiUrl}/api/track/event`,
-      data,
-      this.config.apiKey
-    );
+    sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
   }
 
   track(eventName: string, properties?: Record<string, unknown>): void {
@@ -80,18 +76,10 @@ export class HimetricaClient {
       queryString: window.location.search,
     };
 
-    sendPost(
-      `${this.config.apiUrl}/api/track/custom-event`,
-      data,
-      this.config.apiKey
-    );
+    sendPost(`${this.config.apiUrl}/api/track/custom-event`, data, this.config.apiKey);
   }
 
-  identify(data: {
-    name?: string;
-    email?: string;
-    metadata?: Record<string, unknown>;
-  }): void {
+  identify(data: { name?: string; email?: string; metadata?: Record<string, unknown> }): void {
     if (!isBrowser) return;
 
     const payload = {
@@ -101,22 +89,14 @@ export class HimetricaClient {
       metadata: data.metadata,
     };
 
-    sendPost(
-      `${this.config.apiUrl}/api/track/identify`,
-      payload,
-      this.config.apiKey
-    );
+    sendPost(`${this.config.apiUrl}/api/track/identify`, payload, this.config.apiKey);
   }
 
   captureError(error: Error, context?: Record<string, unknown>): void {
     captureErrorEvent(this.config, error, context);
   }
 
-  captureMessage(
-    message: string,
-    severity?: "error" | "warning" | "info",
-    context?: Record<string, unknown>
-  ): void {
+  captureMessage(message: string, severity?: "error" | "warning" | "info", context?: Record<string, unknown>): void {
     captureMessageEvent(this.config, message, severity, context);
   }
 
