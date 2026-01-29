@@ -45,6 +45,9 @@
     "tsup": "^8.0.0",
     "typescript": "^5.0.0"
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "dependencies": {
     "web-vitals": "^4.2.0"
   }
