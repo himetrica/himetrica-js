@@ -203,7 +203,7 @@ All browser APIs are guarded with `typeof window !== "undefined"` checks. The cl
 
 - **Do Not Track**: Respects the browser's DNT setting by default. Disable with `respectDoNotTrack: false`.
 - **Referrer tracking**: Only captures external referrers (different domain), once per session.
-- **No cookies**: Uses `localStorage` and `sessionStorage` only.
+- **Cookie-free by default**: Uses `localStorage` and `sessionStorage`. Optional first-party cookies for cross-subdomain tracking via `cookieDomain` config.
 
 ## License
 
