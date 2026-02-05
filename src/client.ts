@@ -11,6 +11,7 @@ export class HimetricaClient {
   private currentPageViewId: string | null = null;
   private pageViewStartTime = 0;
   private lastTrackedPath: string | null = null;
+  private autoPageViewsSetup = false;
   private cleanupErrors: (() => void) | null = null;
   // init
   constructor(userConfig: HimetricaConfig) {
@@ -164,6 +165,10 @@ export class HimetricaClient {
   }
 
   private setupAutoPageViews(): void {
+    // Prevent double setup (e.g. constructor called twice)
+    if (this.autoPageViewsSetup) return;
+    this.autoPageViewsSetup = true;
+
     // Track initial page view
     if (document.readyState === "complete") {
       this.trackPageView();
