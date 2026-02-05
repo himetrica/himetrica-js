@@ -92,8 +92,8 @@ export function captureErrorEvent(
   if (isDuplicate(hash)) return;
 
   const payload: ErrorPayload = {
-    visitorId: getVisitorId(),
-    sessionId: getSessionId(config.sessionTimeout),
+    visitorId: getVisitorId(config.cookieDomain),
+    sessionId: getSessionId(config.sessionTimeout, config.cookieDomain),
     type,
     message,
     stack,
