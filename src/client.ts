@@ -6,6 +6,12 @@ import { setupVitals } from "./vitals";
 
 const isBrowser = typeof window !== "undefined";
 
+interface HimetricaWindow extends Window {
+  __himetricaInitialized?: boolean;
+  __himetricaPushStatePatched?: boolean;
+  __himetricaPageViewListeners?: Array<(path: string) => void>;
+}
+
 export class HimetricaClient {
   private config: ResolvedConfig;
   private currentPageViewId: string | null = null;
@@ -13,7 +19,9 @@ export class HimetricaClient {
   private lastTrackedPath: string | null = null;
   private autoPageViewsSetup = false;
   private pendingPageViewTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingPageViewData: Record<string, unknown> | null = null;
   private isFirstPageView = true;
+  private static readonly FIRST_PAGE_VIEW_DELAY = 800; // 800ms - catches redirects
   private static readonly PAGE_VIEW_MIN_DURATION = 3000; // 3 seconds
   private cleanupErrors: (() => void) | null = null;
   // init
@@ -21,6 +29,11 @@ export class HimetricaClient {
     this.config = resolveConfig(userConfig);
 
     if (!isBrowser) return;
+
+    // Prevent multiple tracker instances (same guard as standalone tracker.js)
+    const w = window as HimetricaWindow;
+    if (w.__himetricaInitialized) return;
+    w.__himetricaInitialized = true;
 
     // Respect Do Not Track
     if (this.config.respectDoNotTrack && navigator.doNotTrack === "1") {
@@ -73,16 +86,19 @@ export class HimetricaClient {
       screenHeight: window.screen.height,
     };
 
-    // First pageview sends instantly; subsequent ones wait 3s
-    if (!this.isFirstPageView) {
-      this.pendingPageViewTimer = setTimeout(() => {
-        this.pendingPageViewTimer = null;
-        sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
-      }, HimetricaClient.PAGE_VIEW_MIN_DURATION);
-    } else {
-      this.isFirstPageView = false;
+    // First pageview uses short delay to catch redirect chains;
+    // subsequent ones use longer delay to ensure user actually viewed the page
+    const delay = this.isFirstPageView
+      ? HimetricaClient.FIRST_PAGE_VIEW_DELAY
+      : HimetricaClient.PAGE_VIEW_MIN_DURATION;
+    this.isFirstPageView = false;
+    this.pendingPageViewData = data;
+
+    this.pendingPageViewTimer = setTimeout(() => {
+      this.pendingPageViewTimer = null;
+      this.pendingPageViewData = null;
       sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
-    }
+    }, delay);
   }
 
   track(eventName: string, properties?: Record<string, unknown>): void {
@@ -131,20 +147,30 @@ export class HimetricaClient {
   }
 
   flush(): void {
-    if (this.pendingPageViewTimer) {
-      clearTimeout(this.pendingPageViewTimer);
-      this.pendingPageViewTimer = null;
-    }
+    this.flushPendingPageView();
     this.sendDuration();
   }
 
   destroy(): void {
+    this.flushPendingPageView();
+    this.cleanupErrors?.();
+    this.sendDuration();
+
+    // Reset global flag so a new instance can be created (e.g., Provider remount)
+    if (isBrowser) {
+      (window as HimetricaWindow).__himetricaInitialized = false;
+    }
+  }
+
+  private flushPendingPageView(): void {
     if (this.pendingPageViewTimer) {
       clearTimeout(this.pendingPageViewTimer);
       this.pendingPageViewTimer = null;
     }
-    this.cleanupErrors?.();
-    this.sendDuration();
+    if (this.pendingPageViewData) {
+      sendPost(`${this.config.apiUrl}/api/track/event`, this.pendingPageViewData, this.config.apiKey);
+      this.pendingPageViewData = null;
+    }
   }
 
   // Private methods
@@ -195,6 +221,8 @@ export class HimetricaClient {
     if (this.autoPageViewsSetup) return;
     this.autoPageViewsSetup = true;
 
+    const w = window as HimetricaWindow;
+
     // Track initial page view
     if (document.readyState === "complete") {
       this.trackPageView();
@@ -202,26 +230,57 @@ export class HimetricaClient {
       window.addEventListener("load", () => this.trackPageView());
     }
 
-    // SPA navigation tracking
-    const originalPushState = history.pushState;
+    // SPA navigation: use a single global pushState patch with listener pattern
+    // This prevents chained wrapping when multiple instances exist
+    if (!w.__himetricaPushStatePatched) {
+      w.__himetricaPushStatePatched = true;
+      w.__himetricaPageViewListeners = [];
 
-    history.pushState = (...args) => {
-      originalPushState.apply(history, args);
-      this.trackPageView();
-    };
+      const originalPushState = history.pushState;
+      history.pushState = function (...args) {
+        originalPushState.apply(this, args);
+        const listeners = (window as HimetricaWindow).__himetricaPageViewListeners;
+        if (listeners) {
+          for (const listener of listeners) {
+            listener(window.location.pathname);
+          }
+        }
+      };
 
-    window.addEventListener("popstate", () => {
-      this.trackPageView();
-    });
+      const originalReplaceState = history.replaceState;
+      history.replaceState = function (...args) {
+        originalReplaceState.apply(this, args);
+        const listeners = (window as HimetricaWindow).__himetricaPageViewListeners;
+        if (listeners) {
+          for (const listener of listeners) {
+            listener(window.location.pathname);
+          }
+        }
+      };
 
-    // Send duration on visibility change / unload
+      window.addEventListener("popstate", () => {
+        const listeners = w.__himetricaPageViewListeners;
+        if (listeners) {
+          for (const listener of listeners) {
+            listener(window.location.pathname);
+          }
+        }
+      });
+    }
+
+    // Register this instance's trackPageView as a listener
+    w.__himetricaPageViewListeners!.push(() => this.trackPageView());
+
+    // Flush pending pageview + send duration when page hides or unloads
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
+        this.flushPendingPageView();
         this.sendDuration();
       }
     });
 
     window.addEventListener("beforeunload", () => {
+      this.flushPendingPageView();
       this.sendDuration();
     });
   }
