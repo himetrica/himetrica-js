@@ -9,8 +9,8 @@ export function setupVitals(config: ResolvedConfig): void {
   function sendVital(metric: { name: string; value: number; rating: string }) {
     const url = `${config.apiUrl}/api/track/vitals?apiKey=${config.apiKey}`;
     const data = {
-      visitorId: getVisitorId(),
-      sessionId: getSessionId(config.sessionTimeout),
+      visitorId: getVisitorId(config.cookieDomain),
+      sessionId: getSessionId(config.sessionTimeout, config.cookieDomain),
       metric: metric.name,
       value: metric.value,
       rating: metric.rating,

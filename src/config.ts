@@ -7,6 +7,7 @@ export interface HimetricaConfig {
   trackVitals?: boolean;
   respectDoNotTrack?: boolean;
   sessionTimeout?: number;
+  cookieDomain?: string;
 }
 
 export interface ResolvedConfig {
@@ -18,6 +19,7 @@ export interface ResolvedConfig {
   trackVitals: boolean;
   respectDoNotTrack: boolean;
   sessionTimeout: number;
+  cookieDomain?: string;
 }
 
 export function resolveConfig(config: HimetricaConfig): ResolvedConfig {
@@ -30,5 +32,6 @@ export function resolveConfig(config: HimetricaConfig): ResolvedConfig {
     trackVitals: config.trackVitals ?? false,
     respectDoNotTrack: config.respectDoNotTrack ?? true,
     sessionTimeout: config.sessionTimeout ?? 30 * 60 * 1000,
+    cookieDomain: config.cookieDomain,
   };
 }

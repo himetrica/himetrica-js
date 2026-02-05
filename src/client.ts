@@ -75,8 +75,8 @@ export class HimetricaClient {
     this.pageViewStartTime = Date.now();
 
     const data = {
-      visitorId: getVisitorId(),
-      sessionId: getSessionId(this.config.sessionTimeout),
+      visitorId: getVisitorId(this.config.cookieDomain),
+      sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
       pageViewId: this.currentPageViewId,
       path: path ?? window.location.pathname,
       title: document.title,
@@ -109,8 +109,8 @@ export class HimetricaClient {
     if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(eventName)) return;
 
     const data = {
-      visitorId: getVisitorId(),
-      sessionId: getSessionId(this.config.sessionTimeout),
+      visitorId: getVisitorId(this.config.cookieDomain),
+      sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
       eventName,
       properties,
       path: window.location.pathname,
@@ -125,7 +125,7 @@ export class HimetricaClient {
     if (!isBrowser) return;
 
     const payload = {
-      visitorId: getVisitorId(),
+      visitorId: getVisitorId(this.config.cookieDomain),
       name: data.name,
       email: data.email,
       metadata: data.metadata,
@@ -143,7 +143,7 @@ export class HimetricaClient {
   }
 
   getVisitorId(): string {
-    return getVisitorId();
+    return getVisitorId(this.config.cookieDomain);
   }
 
   flush(): void {
@@ -192,6 +192,37 @@ export class HimetricaClient {
   }
 
   private getOriginalReferrer(): string {
+    if (this.config.cookieDomain) {
+      // Cookie mode: use hm_ref cookie shared across subdomains
+      const match = document.cookie.match(/(?:^|; )hm_ref=([^;]*)/);
+      const storedReferrer = match ? decodeURIComponent(match[1]) : null;
+
+      if (storedReferrer !== null) {
+        return storedReferrer;
+      }
+
+      const docReferrer = document.referrer;
+      let externalReferrer = "";
+      try {
+        if (docReferrer) {
+          const referrerUrl = new URL(docReferrer);
+          if (referrerUrl.hostname !== window.location.hostname) {
+            externalReferrer = docReferrer;
+          }
+        }
+      } catch {
+        // Invalid URL, ignore
+      }
+
+      // Set as session cookie
+      let cookie = `hm_ref=${encodeURIComponent(externalReferrer)}; path=/; SameSite=Lax; domain=${this.config.cookieDomain}`;
+      if (location.protocol === "https:") {
+        cookie += "; Secure";
+      }
+      document.cookie = cookie;
+      return externalReferrer;
+    }
+
     const sessionKey = "hm_original_referrer";
     const storedReferrer = sessionStorage.getItem(sessionKey);
 
