@@ -206,7 +206,11 @@ export class HimetricaClient {
       try {
         if (docReferrer) {
           const referrerUrl = new URL(docReferrer);
-          if (referrerUrl.hostname !== window.location.hostname) {
+          const refHost = referrerUrl.hostname;
+          const cd = this.config.cookieDomain!;
+          const root = cd.startsWith(".") ? cd.slice(1) : cd;
+          // Treat sibling subdomains as internal when cookie domain is set
+          if (refHost !== window.location.hostname && refHost !== root && !refHost.endsWith("." + root)) {
             externalReferrer = docReferrer;
           }
         }
