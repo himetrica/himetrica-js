@@ -10,6 +10,7 @@ export class HimetricaClient {
   private config: ResolvedConfig;
   private currentPageViewId: string | null = null;
   private pageViewStartTime = 0;
+  private lastTrackedPath: string | null = null;
   private cleanupErrors: (() => void) | null = null;
   // init
   constructor(userConfig: HimetricaConfig) {
@@ -37,6 +38,12 @@ export class HimetricaClient {
 
   trackPageView(path?: string): void {
     if (!isBrowser) return;
+
+    const currentPath = path ?? (window.location.pathname + window.location.search);
+
+    // Skip duplicate: same path already tracked
+    if (currentPath === this.lastTrackedPath) return;
+    this.lastTrackedPath = currentPath;
 
     // Send duration for previous page view
     this.sendDuration();
@@ -166,15 +173,9 @@ export class HimetricaClient {
 
     // SPA navigation tracking
     const originalPushState = history.pushState;
-    const originalReplaceState = history.replaceState;
 
     history.pushState = (...args) => {
       originalPushState.apply(history, args);
-      this.trackPageView();
-    };
-
-    history.replaceState = (...args) => {
-      originalReplaceState.apply(history, args);
       this.trackPageView();
     };
 
