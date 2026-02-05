@@ -12,6 +12,9 @@ export class HimetricaClient {
   private pageViewStartTime = 0;
   private lastTrackedPath: string | null = null;
   private autoPageViewsSetup = false;
+  private pendingPageViewTimer: ReturnType<typeof setTimeout> | null = null;
+  private isFirstPageView = true;
+  private static readonly PAGE_VIEW_MIN_DURATION = 3000; // 3 seconds
   private cleanupErrors: (() => void) | null = null;
   // init
   constructor(userConfig: HimetricaConfig) {
@@ -46,6 +49,12 @@ export class HimetricaClient {
     if (currentPath === this.lastTrackedPath) return;
     this.lastTrackedPath = currentPath;
 
+    // Cancel any pending pageview that didn't meet the minimum duration
+    if (this.pendingPageViewTimer) {
+      clearTimeout(this.pendingPageViewTimer);
+      this.pendingPageViewTimer = null;
+    }
+
     // Send duration for previous page view
     this.sendDuration();
 
@@ -64,7 +73,16 @@ export class HimetricaClient {
       screenHeight: window.screen.height,
     };
 
-    sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
+    // First pageview sends instantly; subsequent ones wait 3s
+    if (!this.isFirstPageView) {
+      this.pendingPageViewTimer = setTimeout(() => {
+        this.pendingPageViewTimer = null;
+        sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
+      }, HimetricaClient.PAGE_VIEW_MIN_DURATION);
+    } else {
+      this.isFirstPageView = false;
+      sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
+    }
   }
 
   track(eventName: string, properties?: Record<string, unknown>): void {
@@ -113,10 +131,18 @@ export class HimetricaClient {
   }
 
   flush(): void {
+    if (this.pendingPageViewTimer) {
+      clearTimeout(this.pendingPageViewTimer);
+      this.pendingPageViewTimer = null;
+    }
     this.sendDuration();
   }
 
   destroy(): void {
+    if (this.pendingPageViewTimer) {
+      clearTimeout(this.pendingPageViewTimer);
+      this.pendingPageViewTimer = null;
+    }
     this.cleanupErrors?.();
     this.sendDuration();
   }
