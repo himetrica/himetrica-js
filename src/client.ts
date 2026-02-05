@@ -271,16 +271,18 @@ export class HimetricaClient {
     // Register this instance's trackPageView as a listener
     w.__himetricaPageViewListeners!.push(() => this.trackPageView());
 
-    // Flush pending pageview + send duration when page hides or unloads
+    // Send duration when page becomes hidden or unloads.
+    // NOTE: We intentionally do NOT flush pending pageviews here.
+    // If the user navigates away before the debounce timer fires (800ms/3s),
+    // the pageview is dropped — this correctly filters out redirect chain pages
+    // that the user never actually viewed.
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
-        this.flushPendingPageView();
         this.sendDuration();
       }
     });
 
     window.addEventListener("beforeunload", () => {
-      this.flushPendingPageView();
       this.sendDuration();
     });
   }
