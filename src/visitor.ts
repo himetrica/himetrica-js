@@ -65,6 +65,8 @@ export function getSessionId(timeout: number, cookieDomain?: string): string {
 
     if (!sessionId || !lastTimestamp || now - parseInt(lastTimestamp) > timeout) {
       sessionId = generateId();
+      // New session — clear stale attribution cookies so fresh values are captured
+      clearAttributionCookies(cookieDomain);
     }
 
     setCookie("hm_sid", sessionId, maxAge, cookieDomain);
@@ -93,4 +95,69 @@ export function getSessionId(timeout: number, cookieDomain?: string): string {
 
 export function generatePageViewId(): string {
   return generateId();
+}
+
+function clearAttributionCookies(cookieDomain: string): void {
+  setCookie("hm_ref", "", 0, cookieDomain);
+  setCookie("hm_utm", "", 0, cookieDomain);
+}
+
+function setSessionCookie(name: string, value: string, domain: string): void {
+  if (!isBrowser) return;
+  let cookie = `${name}=${encodeURIComponent(value)}; path=/; SameSite=Lax`;
+  if (domain) {
+    cookie += `; domain=${domain}`;
+  }
+  if (location.protocol === "https:") {
+    cookie += "; Secure";
+  }
+  document.cookie = cookie;
+}
+
+export interface StoredUtmParams {
+  s?: string; // utm_source
+  m?: string; // utm_medium
+  c?: string; // utm_campaign
+  t?: string; // utm_term
+  n?: string; // utm_content
+}
+
+function getUtmParamsFromUrl(): StoredUtmParams | null {
+  if (!isBrowser) return null;
+  const params = new URLSearchParams(window.location.search);
+  const s = params.get("utm_source") || undefined;
+  const m = params.get("utm_medium") || undefined;
+  const c = params.get("utm_campaign") || undefined;
+  const t = params.get("utm_term") || undefined;
+  const n = params.get("utm_content") || undefined;
+  if (!s && !m && !c && !t && !n) return null;
+  return { s, m, c, t, n };
+}
+
+function getStoredUtmParams(cookieDomain?: string): StoredUtmParams | null {
+  if (!cookieDomain) return null;
+  const raw = getCookie("hm_utm");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as StoredUtmParams;
+  } catch {
+    return null;
+  }
+}
+
+function setStoredUtmParams(utm: StoredUtmParams, cookieDomain: string): void {
+  setSessionCookie("hm_utm", JSON.stringify(utm), cookieDomain);
+}
+
+/**
+ * Get UTM params for the current session.
+ * Priority: URL params > cookie (cross-subdomain persistence).
+ */
+export function getSessionUtmParams(cookieDomain?: string): StoredUtmParams | null {
+  const fromUrl = getUtmParamsFromUrl();
+  if (fromUrl) {
+    if (cookieDomain) setStoredUtmParams(fromUrl, cookieDomain);
+    return fromUrl;
+  }
+  return getStoredUtmParams(cookieDomain);
 }
