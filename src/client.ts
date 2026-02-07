@@ -1,6 +1,6 @@
 import { type HimetricaConfig, type ResolvedConfig, resolveConfig } from "./config";
 import { sendPost, sendBeacon } from "./transport";
-import { getVisitorId, getSessionId, generatePageViewId } from "./visitor";
+import { getVisitorId, getSessionId, generatePageViewId, getSessionUtmParams } from "./visitor";
 import { captureErrorEvent, captureMessageEvent, setupErrorHandlers } from "./errors";
 import { setupVitals } from "./vitals";
 
@@ -74,7 +74,10 @@ export class HimetricaClient {
     this.currentPageViewId = generatePageViewId();
     this.pageViewStartTime = Date.now();
 
-    const data = {
+    // Resolve UTM params: URL first, then cookie fallback (cross-subdomain persistence)
+    const utmParams = getSessionUtmParams(this.config.cookieDomain);
+
+    const data: Record<string, unknown> = {
       visitorId: getVisitorId(this.config.cookieDomain),
       sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
       pageViewId: this.currentPageViewId,
@@ -85,6 +88,17 @@ export class HimetricaClient {
       screenWidth: window.screen.width,
       screenHeight: window.screen.height,
     };
+
+    // Include resolved UTM params so server doesn't rely solely on queryString
+    if (utmParams) {
+      data.utmParams = {
+        utm_source: utmParams.s,
+        utm_medium: utmParams.m,
+        utm_campaign: utmParams.c,
+        utm_term: utmParams.t,
+        utm_content: utmParams.n,
+      };
+    }
 
     // First pageview uses short delay to catch redirect chains;
     // subsequent ones use longer delay to ensure user actually viewed the page
