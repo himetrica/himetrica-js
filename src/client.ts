@@ -1,6 +1,6 @@
 import { type HimetricaConfig, type ResolvedConfig, resolveConfig } from "./config";
 import { sendPost, sendBeacon } from "./transport";
-import { getVisitorId, getSessionId, generatePageViewId, getSessionUtmParams } from "./visitor";
+import { getVisitorId, setVisitorId, getSessionId, generatePageViewId, getSessionUtmParams } from "./visitor";
 import { captureErrorEvent, captureMessageEvent, setupErrorHandlers } from "./errors";
 import { setupVitals } from "./vitals";
 
@@ -138,14 +138,35 @@ export class HimetricaClient {
   identify(data: { name?: string; email?: string; metadata?: Record<string, unknown> }): void {
     if (!isBrowser) return;
 
+    const currentVisitorId = getVisitorId(this.config.cookieDomain);
     const payload = {
-      visitorId: getVisitorId(this.config.cookieDomain),
+      visitorId: currentVisitorId,
       name: data.name,
       email: data.email,
       metadata: data.metadata,
     };
 
-    sendPost(`${this.config.apiUrl}/api/track/identify`, payload, this.config.apiKey);
+    const cookieDomain = this.config.cookieDomain;
+    fetch(`${this.config.apiUrl}/api/track/identify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": this.config.apiKey,
+      },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        // Server returns canonical visitorId when a merge occurred —
+        // update client storage so subsequent pageviews use the correct ID
+        if (json?.visitorId && json.visitorId !== currentVisitorId) {
+          setVisitorId(json.visitorId, cookieDomain);
+        }
+      })
+      .catch(() => {
+        // Silently fail
+      });
   }
 
   captureError(error: Error, context?: Record<string, unknown>): void {
