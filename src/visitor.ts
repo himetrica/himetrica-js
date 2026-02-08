@@ -53,6 +53,15 @@ export function getVisitorId(cookieDomain?: string): string {
   return visitorId;
 }
 
+export function setVisitorId(id: string, cookieDomain?: string): void {
+  if (!isBrowser) return;
+  if (cookieDomain) {
+    setCookie("hm_vid", id, 365 * 24 * 60 * 60, cookieDomain);
+  } else {
+    localStorage.setItem("hm_visitor_id", id);
+  }
+}
+
 export function getSessionId(timeout: number, cookieDomain?: string): string {
   if (!isBrowser) return "";
 
