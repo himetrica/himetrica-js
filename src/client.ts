@@ -66,6 +66,7 @@ export class HimetricaClient {
     if (this.pendingPageViewTimer) {
       clearTimeout(this.pendingPageViewTimer);
       this.pendingPageViewTimer = null;
+      this.pendingPageViewData = null;
     }
 
     // Send duration for previous page view
@@ -111,6 +112,10 @@ export class HimetricaClient {
     this.pendingPageViewTimer = setTimeout(() => {
       this.pendingPageViewTimer = null;
       this.pendingPageViewData = null;
+      // Read title at send time — frameworks (Next.js, React) update document.title
+      // asynchronously after pushState/replaceState, so capturing it earlier
+      // would return the previous page's title.
+      data.title = document.title;
       sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
     }, delay);
   }
@@ -203,6 +208,7 @@ export class HimetricaClient {
       this.pendingPageViewTimer = null;
     }
     if (this.pendingPageViewData) {
+      this.pendingPageViewData.title = document.title;
       sendPost(`${this.config.apiUrl}/api/track/event`, this.pendingPageViewData, this.config.apiKey);
       this.pendingPageViewData = null;
     }
