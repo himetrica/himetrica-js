@@ -1,6 +1,6 @@
 {
   "name": "@himetrica/tracker-js",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -46,7 +46,8 @@
     "typescript": "^5.0.0"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
   },
   "dependencies": {
     "web-vitals": "^4.2.0"
