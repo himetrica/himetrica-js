@@ -21,8 +21,8 @@ export class HimetricaClient {
   private pendingPageViewTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingPageViewData: Record<string, unknown> | null = null;
   private isFirstPageView = true;
-  private static readonly FIRST_PAGE_VIEW_DELAY = 800; // 800ms - catches redirects
-  private static readonly PAGE_VIEW_MIN_DURATION = 3000; // 3 seconds
+  private static readonly FIRST_PAGE_VIEW_DELAY = 300; // 300ms - catches redirects
+  private static readonly PAGE_VIEW_MIN_DURATION = 1000; // 1 second
   private cleanupErrors: (() => void) | null = null;
   // init
   constructor(userConfig: HimetricaConfig) {
