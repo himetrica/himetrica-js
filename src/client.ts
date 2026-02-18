@@ -24,11 +24,19 @@ export class HimetricaClient {
   private static readonly FIRST_PAGE_VIEW_DELAY = 300; // 300ms - catches redirects
   private static readonly PAGE_VIEW_MIN_DURATION = 1000; // 1 second
   private cleanupErrors: (() => void) | null = null;
+  private disabled = false;
   // init
   constructor(userConfig: HimetricaConfig) {
     this.config = resolveConfig(userConfig);
 
     if (!isBrowser) return;
+
+    // Don't track on localhost
+    const hostname = window.location.hostname;
+    if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+      this.disabled = true;
+      return;
+    }
 
     // Prevent multiple tracker instances (same guard as standalone tracker.js)
     const w = window as HimetricaWindow;
@@ -54,7 +62,7 @@ export class HimetricaClient {
   }
 
   trackPageView(path?: string): void {
-    if (!isBrowser) return;
+    if (!isBrowser || this.disabled) return;
 
     const currentPath = path ?? (window.location.pathname + window.location.search);
 
@@ -121,7 +129,7 @@ export class HimetricaClient {
   }
 
   track(eventName: string, properties?: Record<string, unknown>): void {
-    if (!isBrowser) return;
+    if (!isBrowser || this.disabled) return;
 
     if (!eventName || typeof eventName !== "string") return;
     if (eventName.length > 255) return;
@@ -141,7 +149,7 @@ export class HimetricaClient {
   }
 
   identify(data: { name?: string; email?: string; metadata?: Record<string, unknown> }): void {
-    if (!isBrowser) return;
+    if (!isBrowser || this.disabled) return;
 
     const currentVisitorId = getVisitorId(this.config.cookieDomain);
     const payload = {
@@ -175,10 +183,12 @@ export class HimetricaClient {
   }
 
   captureError(error: Error, context?: Record<string, unknown>): void {
+    if (this.disabled) return;
     captureErrorEvent(this.config, error, context);
   }
 
   captureMessage(message: string, severity?: "error" | "warning" | "info", context?: Record<string, unknown>): void {
+    if (this.disabled) return;
     captureMessageEvent(this.config, message, severity, context);
   }
 
