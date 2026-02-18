@@ -31,6 +31,18 @@ export class HimetricaClient {
 
     if (!isBrowser) return;
 
+    // Don't track inside iframes — prevents double-counting when parent page also has the tracker
+    try {
+      if (window.self !== window.top) {
+        this.disabled = true;
+        return;
+      }
+    } catch {
+      // Sandboxed iframe — window.top access throws SecurityError
+      this.disabled = true;
+      return;
+    }
+
     // Don't track on localhost
     const hostname = window.location.hostname;
     if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
