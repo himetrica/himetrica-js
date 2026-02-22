@@ -6,6 +6,13 @@ import { setupVitals } from "./vitals";
 
 const isBrowser = typeof window !== "undefined";
 
+export interface VisitorInfo {
+  isReturning: boolean;
+  isIdentified: boolean;
+  firstVisit: string | null;
+  visitCount: number;
+}
+
 interface HimetricaWindow extends Window {
   __himetricaInitialized?: boolean;
   __himetricaPushStatePatched?: boolean;
@@ -25,6 +32,8 @@ export class HimetricaClient {
   private static readonly PAGE_VIEW_MIN_DURATION = 1000; // 1 second
   private cleanupErrors: (() => void) | null = null;
   private disabled = false;
+  private visitorInfoCache: VisitorInfo | null = null;
+  private visitorInfoPromise: Promise<VisitorInfo | null> | null = null;
   // init
   constructor(userConfig: HimetricaConfig) {
     this.config = resolveConfig(userConfig);
@@ -206,6 +215,30 @@ export class HimetricaClient {
 
   getVisitorId(): string {
     return getVisitorId(this.config.cookieDomain);
+  }
+
+  async getVisitorInfo(): Promise<VisitorInfo | null> {
+    if (!isBrowser || this.disabled) return null;
+    if (this.visitorInfoCache) return this.visitorInfoCache;
+    if (this.visitorInfoPromise) return this.visitorInfoPromise;
+    this.visitorInfoPromise = this.fetchVisitorInfo();
+    return this.visitorInfoPromise;
+  }
+
+  private async fetchVisitorInfo(): Promise<VisitorInfo | null> {
+    try {
+      const visitorId = getVisitorId(this.config.cookieDomain);
+      const url = `${this.config.apiUrl}/api/track/visitor-info?apiKey=${encodeURIComponent(this.config.apiKey)}&visitorId=${encodeURIComponent(visitorId)}`;
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const data: VisitorInfo = await res.json();
+      this.visitorInfoCache = data;
+      return data;
+    } catch {
+      return null;
+    } finally {
+      this.visitorInfoPromise = null;
+    }
   }
 
   flush(): void {
