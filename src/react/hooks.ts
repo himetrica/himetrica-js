@@ -10,14 +10,21 @@ export function useHimetrica(): HimetricaClient {
   return client;
 }
 
+/**
+ * Returns null when used outside a provider — safe for optional usage.
+ */
+function useHimetricaSafe(): HimetricaClient | null {
+  return useContext(HimetricaContext);
+}
+
 export function useTrackEvent(): (
   eventName: string,
   properties?: Record<string, unknown>
 ) => void {
-  const client = useHimetrica();
+  const client = useHimetricaSafe();
   return useCallback(
     (eventName: string, properties?: Record<string, unknown>) => {
-      client.track(eventName, properties);
+      client?.track(eventName, properties);
     },
     [client]
   );
@@ -27,10 +34,10 @@ export function useCaptureError(): (
   error: Error,
   context?: Record<string, unknown>
 ) => void {
-  const client = useHimetrica();
+  const client = useHimetricaSafe();
   return useCallback(
     (error: Error, context?: Record<string, unknown>) => {
-      client.captureError(error, context);
+      client?.captureError(error, context);
     },
     [client]
   );
@@ -46,10 +53,16 @@ const VISITOR_INFO_DEFAULTS = {
 };
 
 export function useVisitorInfo() {
-  const client = useHimetrica();
+  const client = useHimetricaSafe();
   const [state, setState] = useState(VISITOR_INFO_DEFAULTS);
 
   useEffect(() => {
+    // Gracefully degrade when no provider — return defaults with isLoading: false
+    if (!client) {
+      setState({ ...VISITOR_INFO_DEFAULTS, isLoading: false });
+      return;
+    }
+
     let cancelled = false;
 
     client

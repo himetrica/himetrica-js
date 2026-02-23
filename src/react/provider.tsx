@@ -21,6 +21,8 @@ export function HimetricaProvider({
   useEffect(() => {
     return () => {
       clientRef.current?.destroy();
+      // Null out so React StrictMode remount creates a fresh client
+      clientRef.current = null;
     };
   }, []);
 

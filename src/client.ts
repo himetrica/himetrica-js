@@ -17,6 +17,8 @@ interface HimetricaWindow extends Window {
   __himetricaInitialized?: boolean;
   __himetricaPushStatePatched?: boolean;
   __himetricaPageViewListeners?: Array<(path: string) => void>;
+  __himetricaOriginalPushState?: typeof history.pushState;
+  __himetricaOriginalReplaceState?: typeof history.replaceState;
 }
 
 export class HimetricaClient {
@@ -32,8 +34,16 @@ export class HimetricaClient {
   private static readonly PAGE_VIEW_MIN_DURATION = 1000; // 1 second
   private cleanupErrors: (() => void) | null = null;
   private disabled = false;
+  private destroyed = false;
   private visitorInfoCache: VisitorInfo | null = null;
   private visitorInfoPromise: Promise<VisitorInfo | null> | null = null;
+
+  // Bound listener references for proper removal
+  private pageViewListener: ((path: string) => void) | null = null;
+  private visibilityListener: (() => void) | null = null;
+  private beforeUnloadListener: (() => void) | null = null;
+  private loadListener: (() => void) | null = null;
+
   // init
   constructor(userConfig: HimetricaConfig) {
     this.config = resolveConfig(userConfig);
@@ -64,9 +74,13 @@ export class HimetricaClient {
     if (w.__himetricaInitialized) return;
     w.__himetricaInitialized = true;
 
-    // Respect Do Not Track
-    if (this.config.respectDoNotTrack && navigator.doNotTrack === "1") {
-      return;
+    // Respect Do Not Track / Global Privacy Control
+    if (this.config.respectDoNotTrack) {
+      const dnt = navigator.doNotTrack === "1";
+      const gpc = !!(navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl;
+      if (dnt || gpc) {
+        return;
+      }
     }
 
     if (this.config.autoTrackErrors) {
@@ -83,7 +97,7 @@ export class HimetricaClient {
   }
 
   trackPageView(path?: string): void {
-    if (!isBrowser || this.disabled) return;
+    if (!isBrowser || this.disabled || this.destroyed) return;
 
     const currentPath = path ?? (window.location.pathname + window.location.search);
 
@@ -150,7 +164,7 @@ export class HimetricaClient {
   }
 
   track(eventName: string, properties?: Record<string, unknown>): void {
-    if (!isBrowser || this.disabled) return;
+    if (!isBrowser || this.disabled || this.destroyed) return;
 
     if (!eventName || typeof eventName !== "string") return;
     if (eventName.length > 255) return;
@@ -170,7 +184,7 @@ export class HimetricaClient {
   }
 
   identify(data: { name?: string; email?: string; metadata?: Record<string, unknown> }): void {
-    if (!isBrowser || this.disabled) return;
+    if (!isBrowser || this.disabled || this.destroyed) return;
 
     const currentVisitorId = getVisitorId(this.config.cookieDomain);
     const payload = {
@@ -204,12 +218,12 @@ export class HimetricaClient {
   }
 
   captureError(error: Error, context?: Record<string, unknown>): void {
-    if (this.disabled) return;
+    if (this.disabled || this.destroyed) return;
     captureErrorEvent(this.config, error, context);
   }
 
   captureMessage(message: string, severity?: "error" | "warning" | "info", context?: Record<string, unknown>): void {
-    if (this.disabled) return;
+    if (this.disabled || this.destroyed) return;
     captureMessageEvent(this.config, message, severity, context);
   }
 
@@ -218,7 +232,7 @@ export class HimetricaClient {
   }
 
   async getVisitorInfo(): Promise<VisitorInfo | null> {
-    if (!isBrowser || this.disabled) return null;
+    if (!isBrowser || this.disabled || this.destroyed) return null;
     if (this.visitorInfoCache) return this.visitorInfoCache;
     if (this.visitorInfoPromise) return this.visitorInfoPromise;
     this.visitorInfoPromise = this.fetchVisitorInfo();
@@ -242,18 +256,59 @@ export class HimetricaClient {
   }
 
   flush(): void {
+    if (this.destroyed) return;
     this.flushPendingPageView();
     this.sendDuration();
   }
 
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+
     this.flushPendingPageView();
     this.cleanupErrors?.();
+    this.cleanupErrors = null;
     this.sendDuration();
 
-    // Reset global flag so a new instance can be created (e.g., Provider remount)
     if (isBrowser) {
-      (window as HimetricaWindow).__himetricaInitialized = false;
+      const w = window as HimetricaWindow;
+
+      // Remove this instance's page view listener from the global array
+      if (this.pageViewListener && w.__himetricaPageViewListeners) {
+        const idx = w.__himetricaPageViewListeners.indexOf(this.pageViewListener);
+        if (idx !== -1) w.__himetricaPageViewListeners.splice(idx, 1);
+
+        // If no more listeners, restore original history methods
+        if (w.__himetricaPageViewListeners.length === 0) {
+          if (w.__himetricaOriginalPushState) {
+            history.pushState = w.__himetricaOriginalPushState;
+          }
+          if (w.__himetricaOriginalReplaceState) {
+            history.replaceState = w.__himetricaOriginalReplaceState;
+          }
+          w.__himetricaPushStatePatched = false;
+          w.__himetricaPageViewListeners = undefined;
+          w.__himetricaOriginalPushState = undefined;
+          w.__himetricaOriginalReplaceState = undefined;
+        }
+      }
+
+      // Remove event listeners
+      if (this.visibilityListener) {
+        document.removeEventListener("visibilitychange", this.visibilityListener);
+        this.visibilityListener = null;
+      }
+      if (this.beforeUnloadListener) {
+        window.removeEventListener("beforeunload", this.beforeUnloadListener);
+        this.beforeUnloadListener = null;
+      }
+      if (this.loadListener) {
+        window.removeEventListener("load", this.loadListener);
+        this.loadListener = null;
+      }
+
+      // Reset global flag so a new instance can be created (e.g., Provider remount)
+      w.__himetricaInitialized = false;
     }
   }
 
@@ -358,7 +413,8 @@ export class HimetricaClient {
     if (document.readyState === "complete") {
       this.trackPageView();
     } else {
-      window.addEventListener("load", () => this.trackPageView());
+      this.loadListener = () => this.trackPageView();
+      window.addEventListener("load", this.loadListener);
     }
 
     // SPA navigation: use a single global pushState patch with listener pattern
@@ -368,23 +424,28 @@ export class HimetricaClient {
       w.__himetricaPageViewListeners = [];
 
       const originalPushState = history.pushState;
+      const originalReplaceState = history.replaceState;
+
+      // Store originals for restoration on destroy
+      w.__himetricaOriginalPushState = originalPushState;
+      w.__himetricaOriginalReplaceState = originalReplaceState;
+
       history.pushState = function (...args) {
         originalPushState.apply(this, args);
         const listeners = (window as HimetricaWindow).__himetricaPageViewListeners;
         if (listeners) {
           for (const listener of listeners) {
-            listener(window.location.pathname);
+            try { listener(window.location.pathname); } catch { /* isolate listener errors */ }
           }
         }
       };
 
-      const originalReplaceState = history.replaceState;
       history.replaceState = function (...args) {
         originalReplaceState.apply(this, args);
         const listeners = (window as HimetricaWindow).__himetricaPageViewListeners;
         if (listeners) {
           for (const listener of listeners) {
-            listener(window.location.pathname);
+            try { listener(window.location.pathname); } catch { /* isolate listener errors */ }
           }
         }
       };
@@ -393,28 +454,31 @@ export class HimetricaClient {
         const listeners = w.__himetricaPageViewListeners;
         if (listeners) {
           for (const listener of listeners) {
-            listener(window.location.pathname);
+            try { listener(window.location.pathname); } catch { /* isolate listener errors */ }
           }
         }
       });
     }
 
-    // Register this instance's trackPageView as a listener
-    w.__himetricaPageViewListeners!.push(() => this.trackPageView());
+    // Register this instance's trackPageView as a listener (store reference for cleanup)
+    this.pageViewListener = () => this.trackPageView();
+    w.__himetricaPageViewListeners!.push(this.pageViewListener);
 
     // Send duration when page becomes hidden or unloads.
     // NOTE: We intentionally do NOT flush pending pageviews here.
     // If the user navigates away before the debounce timer fires (800ms/3s),
     // the pageview is dropped — this correctly filters out redirect chain pages
     // that the user never actually viewed.
-    document.addEventListener("visibilitychange", () => {
+    this.visibilityListener = () => {
       if (document.visibilityState === "hidden") {
         this.sendDuration();
       }
-    });
+    };
+    document.addEventListener("visibilitychange", this.visibilityListener);
 
-    window.addEventListener("beforeunload", () => {
+    this.beforeUnloadListener = () => {
       this.sendDuration();
-    });
+    };
+    window.addEventListener("beforeunload", this.beforeUnloadListener);
   }
 }
