@@ -19,10 +19,11 @@ interface HimetricaWindow extends Window {
   __himetricaPageViewListeners?: Array<(path: string) => void>;
   __himetricaOriginalPushState?: typeof history.pushState;
   __himetricaOriginalReplaceState?: typeof history.replaceState;
+  __himetricaPopstateListener?: ((e: PopStateEvent) => void) | null;
 }
 
 export class HimetricaClient {
-  private config: ResolvedConfig;
+  private config!: ResolvedConfig;
   private currentPageViewId: string | null = null;
   private pageViewStartTime = 0;
   private lastTrackedPath: string | null = null;
@@ -44,9 +45,28 @@ export class HimetricaClient {
   private beforeUnloadListener: (() => void) | null = null;
   private loadListener: (() => void) | null = null;
 
-  // init
+  // init — constructor NEVER throws; invalid config disables the tracker
   constructor(userConfig: HimetricaConfig) {
-    this.config = resolveConfig(userConfig);
+    try {
+      this.config = resolveConfig(userConfig);
+    } catch (e) {
+      if (typeof console !== "undefined") {
+        console.warn("[Himetrica]", e instanceof Error ? e.message : e);
+      }
+      this.disabled = true;
+      // Provide a minimal config so methods don't crash on property access
+      this.config = {
+        apiKey: "",
+        apiUrl: "",
+        autoTrackPageViews: false,
+        autoTrackErrors: false,
+        interceptConsole: false,
+        trackVitals: false,
+        respectDoNotTrack: true,
+        sessionTimeout: 1800000,
+      };
+      return;
+    }
 
     if (!isBrowser) return;
 
@@ -278,13 +298,17 @@ export class HimetricaClient {
         const idx = w.__himetricaPageViewListeners.indexOf(this.pageViewListener);
         if (idx !== -1) w.__himetricaPageViewListeners.splice(idx, 1);
 
-        // If no more listeners, restore original history methods
+        // If no more listeners, restore original history methods and clean up popstate
         if (w.__himetricaPageViewListeners.length === 0) {
           if (w.__himetricaOriginalPushState) {
             history.pushState = w.__himetricaOriginalPushState;
           }
           if (w.__himetricaOriginalReplaceState) {
             history.replaceState = w.__himetricaOriginalReplaceState;
+          }
+          if (w.__himetricaPopstateListener) {
+            window.removeEventListener("popstate", w.__himetricaPopstateListener);
+            w.__himetricaPopstateListener = null;
           }
           w.__himetricaPushStatePatched = false;
           w.__himetricaPageViewListeners = undefined;
@@ -343,6 +367,14 @@ export class HimetricaClient {
   }
 
   private getOriginalReferrer(): string {
+    try {
+      return this._getOriginalReferrerUnsafe();
+    } catch {
+      return "";
+    }
+  }
+
+  private _getOriginalReferrerUnsafe(): string {
     if (this.config.cookieDomain) {
       // Cookie mode: use hm_ref cookie shared across subdomains
       const match = document.cookie.match(/(?:^|; )hm_ref=([^;]*)/);
@@ -360,7 +392,6 @@ export class HimetricaClient {
           const refHost = referrerUrl.hostname;
           const cd = this.config.cookieDomain!;
           const root = cd.startsWith(".") ? cd.slice(1) : cd;
-          // Treat sibling subdomains as internal when cookie domain is set
           if (refHost !== window.location.hostname && refHost !== root && !refHost.endsWith("." + root)) {
             externalReferrer = docReferrer;
           }
@@ -369,7 +400,6 @@ export class HimetricaClient {
         // Invalid URL, ignore
       }
 
-      // Set as session cookie
       let cookie = `hm_ref=${encodeURIComponent(externalReferrer)}; path=/; SameSite=Lax; domain=${this.config.cookieDomain}`;
       if (location.protocol === "https:") {
         cookie += "; Secure";
@@ -378,8 +408,10 @@ export class HimetricaClient {
       return externalReferrer;
     }
 
+    // sessionStorage mode — wrapped in safe accessors via visitor.ts
     const sessionKey = "hm_original_referrer";
-    const storedReferrer = sessionStorage.getItem(sessionKey);
+    let storedReferrer: string | null = null;
+    try { storedReferrer = sessionStorage.getItem(sessionKey); } catch { /* storage blocked */ }
 
     if (storedReferrer !== null) {
       return storedReferrer;
@@ -398,7 +430,7 @@ export class HimetricaClient {
       // Invalid URL, ignore
     }
 
-    sessionStorage.setItem(sessionKey, externalReferrer);
+    try { sessionStorage.setItem(sessionKey, externalReferrer); } catch { /* storage blocked */ }
     return externalReferrer;
   }
 
@@ -450,14 +482,17 @@ export class HimetricaClient {
         }
       };
 
-      window.addEventListener("popstate", () => {
-        const listeners = w.__himetricaPageViewListeners;
+      // Store the popstate listener reference for cleanup
+      const popstateListener = () => {
+        const listeners = (window as HimetricaWindow).__himetricaPageViewListeners;
         if (listeners) {
           for (const listener of listeners) {
             try { listener(window.location.pathname); } catch { /* isolate listener errors */ }
           }
         }
-      });
+      };
+      w.__himetricaPopstateListener = popstateListener;
+      window.addEventListener("popstate", popstateListener);
     }
 
     // Register this instance's trackPageView as a listener (store reference for cleanup)
