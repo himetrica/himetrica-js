@@ -153,12 +153,13 @@ export function setupErrorHandlers(config: ResolvedConfig): () => void {
 
   // Store previous onerror so we can chain, not clobber
   const previousOnError = window.onerror;
-  window.onerror = function (...args) {
+  const ourOnError = function (...args: Parameters<OnErrorEventHandler>) {
     try { handleWindowError(...args); } catch { /* never throw from error handler */ }
     if (typeof previousOnError === "function") {
-      return previousOnError.apply(this, args);
+      return (previousOnError as Function).apply(this, args);
     }
   };
+  window.onerror = ourOnError;
 
   window.addEventListener("unhandledrejection", handleUnhandledRejection);
 
@@ -198,12 +199,10 @@ export function setupErrorHandlers(config: ResolvedConfig): () => void {
 
   // Return cleanup function
   return () => {
-    // Restore onerror — only remove ours, restore previous
-    if (window.onerror === handleWindowError || (window.onerror as any)?.__himetrica) {
+    // Restore onerror — only remove ours, restore previous.
+    // If someone else replaced onerror after us, leave theirs alone.
+    if (window.onerror === ourOnError) {
       window.onerror = previousOnError ?? null;
-    } else {
-      // Someone else replaced onerror after us, don't clobber theirs
-      window.onerror = null;
     }
 
     window.removeEventListener("unhandledrejection", handleUnhandledRejection);

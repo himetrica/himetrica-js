@@ -8,22 +8,39 @@ function generateId(): string {
   });
 }
 
+// Safe storage wrappers — localStorage/sessionStorage can throw in:
+// - Safari private browsing (QuotaExceededError)
+// - Sandboxed iframes
+// - Storage full
+// - Disabled by security policy
+function safeGetItem(storage: Storage, key: string): string | null {
+  try { return storage.getItem(key); } catch { return null; }
+}
+
+function safeSetItem(storage: Storage, key: string, value: string): void {
+  try { storage.setItem(key, value); } catch { /* silently fail */ }
+}
+
 function getCookie(name: string): string | null {
   if (!isBrowser) return null;
-  const match = document.cookie.match(new RegExp("(?:^|; )" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]*)"));
-  return match ? decodeURIComponent(match[1]) : null;
+  try {
+    const match = document.cookie.match(new RegExp("(?:^|; )" + name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "=([^;]*)"));
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch { return null; }
 }
 
 function setCookie(name: string, value: string, maxAge: number, domain: string): void {
   if (!isBrowser) return;
-  let cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax`;
-  if (domain) {
-    cookie += `; domain=${domain}`;
-  }
-  if (location.protocol === "https:") {
-    cookie += "; Secure";
-  }
-  document.cookie = cookie;
+  try {
+    let cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAge}; SameSite=Lax`;
+    if (domain) {
+      cookie += `; domain=${domain}`;
+    }
+    if (location.protocol === "https:") {
+      cookie += "; Secure";
+    }
+    document.cookie = cookie;
+  } catch { /* silently fail */ }
 }
 
 export function getVisitorId(cookieDomain?: string): string {
@@ -33,7 +50,7 @@ export function getVisitorId(cookieDomain?: string): string {
     let visitorId = getCookie("hm_vid");
     if (!visitorId) {
       // Migrate from localStorage if available
-      visitorId = localStorage.getItem("hm_visitor_id");
+      visitorId = safeGetItem(localStorage, "hm_visitor_id");
       if (!visitorId) {
         visitorId = generateId();
       }
@@ -43,11 +60,11 @@ export function getVisitorId(cookieDomain?: string): string {
   }
 
   const storageKey = "hm_visitor_id";
-  let visitorId = localStorage.getItem(storageKey);
+  let visitorId = safeGetItem(localStorage, storageKey);
 
   if (!visitorId) {
     visitorId = generateId();
-    localStorage.setItem(storageKey, visitorId);
+    safeSetItem(localStorage, storageKey, visitorId);
   }
 
   return visitorId;
@@ -58,7 +75,7 @@ export function setVisitorId(id: string, cookieDomain?: string): void {
   if (cookieDomain) {
     setCookie("hm_vid", id, 365 * 24 * 60 * 60, cookieDomain);
   } else {
-    localStorage.setItem("hm_visitor_id", id);
+    safeSetItem(localStorage, "hm_visitor_id", id);
   }
 }
 
@@ -86,8 +103,8 @@ export function getSessionId(timeout: number, cookieDomain?: string): string {
   const storageKey = "hm_session_id";
   const timestampKey = "hm_session_timestamp";
 
-  let sessionId = sessionStorage.getItem(storageKey);
-  const lastTimestamp = sessionStorage.getItem(timestampKey);
+  let sessionId = safeGetItem(sessionStorage, storageKey);
+  const lastTimestamp = safeGetItem(sessionStorage, timestampKey);
 
   if (
     !sessionId ||
@@ -95,10 +112,10 @@ export function getSessionId(timeout: number, cookieDomain?: string): string {
     now - parseInt(lastTimestamp) > timeout
   ) {
     sessionId = generateId();
-    sessionStorage.setItem(storageKey, sessionId);
+    safeSetItem(sessionStorage, storageKey, sessionId);
   }
 
-  sessionStorage.setItem(timestampKey, now.toString());
+  safeSetItem(sessionStorage, timestampKey, now.toString());
   return sessionId;
 }
 
@@ -113,14 +130,16 @@ function clearAttributionCookies(cookieDomain: string): void {
 
 function setSessionCookie(name: string, value: string, domain: string): void {
   if (!isBrowser) return;
-  let cookie = `${name}=${encodeURIComponent(value)}; path=/; SameSite=Lax`;
-  if (domain) {
-    cookie += `; domain=${domain}`;
-  }
-  if (location.protocol === "https:") {
-    cookie += "; Secure";
-  }
-  document.cookie = cookie;
+  try {
+    let cookie = `${name}=${encodeURIComponent(value)}; path=/; SameSite=Lax`;
+    if (domain) {
+      cookie += `; domain=${domain}`;
+    }
+    if (location.protocol === "https:") {
+      cookie += "; Secure";
+    }
+    document.cookie = cookie;
+  } catch { /* silently fail */ }
 }
 
 export interface StoredUtmParams {

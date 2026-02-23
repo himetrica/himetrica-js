@@ -3,22 +3,34 @@ const isBrowser = typeof window !== "undefined";
 export function sendBeacon(url: string, data: unknown): void {
   if (!isBrowser) return;
 
-  const payload = JSON.stringify(data);
+  try {
+    const payload = JSON.stringify(data);
 
-  if (navigator.sendBeacon) {
-    navigator.sendBeacon(
-      url,
-      new Blob([payload], { type: "application/json" })
-    );
-  } else {
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload,
-      keepalive: true,
-    }).catch(() => {
-      // Silently fail
-    });
+    if (navigator.sendBeacon) {
+      const sent = navigator.sendBeacon(
+        url,
+        new Blob([payload], { type: "application/json" })
+      );
+      // sendBeacon returns false if the browser couldn't queue it (payload too large, etc.)
+      // Fall back to fetch in that case
+      if (!sent) {
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+          keepalive: true,
+        }).catch(() => {});
+      }
+    } else {
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  } catch {
+    // JSON.stringify can throw on circular refs, sendBeacon can throw — never propagate
   }
 }
 
@@ -29,15 +41,17 @@ export function sendPost(
 ): void {
   if (!isBrowser) return;
 
-  fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": apiKey,
-    },
-    body: JSON.stringify(data),
-    keepalive: true,
-  }).catch(() => {
-    // Silently fail
-  });
+  try {
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": apiKey,
+      },
+      body: JSON.stringify(data),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // JSON.stringify can throw on circular refs — never propagate
+  }
 }
