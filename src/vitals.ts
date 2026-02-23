@@ -1,4 +1,3 @@
-import { onLCP, onINP, onCLS, onFCP, onTTFB } from "web-vitals";
 import type { ResolvedConfig } from "./config";
 import { getVisitorId, getSessionId } from "./visitor";
 import { sendBeacon } from "./transport";
@@ -19,9 +18,17 @@ export function setupVitals(config: ResolvedConfig): void {
     sendBeacon(url, data);
   }
 
-  onTTFB(sendVital);
-  onFCP(sendVital);
-  onLCP(sendVital);
-  onCLS(sendVital);
-  onINP(sendVital);
+  // Dynamic import — web-vitals is only loaded when trackVitals is true,
+  // so it doesn't increase bundle size for users who don't need it
+  import("web-vitals")
+    .then(({ onTTFB, onFCP, onLCP, onCLS, onINP }) => {
+      onTTFB(sendVital);
+      onFCP(sendVital);
+      onLCP(sendVital);
+      onCLS(sendVital);
+      onINP(sendVital);
+    })
+    .catch(() => {
+      // web-vitals not available — silently skip
+    });
 }

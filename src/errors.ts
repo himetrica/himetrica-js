@@ -21,11 +21,12 @@ interface ErrorPayload {
 // Rate limiting
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW = 60 * 1000;
-const errorTimestamps: number[] = [];
+let errorTimestamps: number[] = [];
 
 // Deduplication
-const sentErrorHashes = new Set<string>();
+let sentErrorHashes = new Set<string>();
 const DEDUP_EXPIRY = 5 * 60 * 1000;
+const dedupTimers: ReturnType<typeof setTimeout>[] = [];
 
 function hashError(
   message: string,
@@ -60,7 +61,8 @@ function isDuplicate(hash: string): boolean {
     return true;
   }
   sentErrorHashes.add(hash);
-  setTimeout(() => sentErrorHashes.delete(hash), DEDUP_EXPIRY);
+  const timer = setTimeout(() => sentErrorHashes.delete(hash), DEDUP_EXPIRY);
+  dedupTimers.push(timer);
   return false;
 }
 
@@ -119,6 +121,9 @@ export function captureMessageEvent(
   captureErrorEvent(config, message, context, "console", severity);
 }
 
+// Symbol to detect if console methods are already patched by us
+const PATCHED_SYMBOL = Symbol.for("__himetrica_console_patched__");
+
 export function setupErrorHandlers(config: ResolvedConfig): () => void {
   if (typeof window === "undefined") return () => {};
 
@@ -146,38 +151,73 @@ export function setupErrorHandlers(config: ResolvedConfig): () => void {
     captureErrorEvent(config, err, { reason: String(reason) }, "unhandledrejection", "error");
   };
 
-  window.onerror = handleWindowError;
+  // Store previous onerror so we can chain, not clobber
+  const previousOnError = window.onerror;
+  window.onerror = function (...args) {
+    try { handleWindowError(...args); } catch { /* never throw from error handler */ }
+    if (typeof previousOnError === "function") {
+      return previousOnError.apply(this, args);
+    }
+  };
+
   window.addEventListener("unhandledrejection", handleUnhandledRejection);
 
+  // Capture truly original console methods before any patching
+  // Use the symbol to prevent double-wrapping
   let originalError: typeof console.error | undefined;
   let originalWarn: typeof console.warn | undefined;
 
-  if (config.interceptConsole) {
+  if (config.interceptConsole && !(console as any)[PATCHED_SYMBOL]) {
     originalError = console.error;
     originalWarn = console.warn;
 
-    console.error = function (...args: unknown[]) {
-      originalError!.apply(console, args);
-      const msg = args
-        .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
-        .join(" ");
-      captureErrorEvent(config, msg, { args }, "console", "error");
+    const wrappedError = function (...args: unknown[]) {
+      try { originalError!.apply(console, args); } catch { /* never break console */ }
+      try {
+        const msg = args
+          .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
+          .join(" ");
+        captureErrorEvent(config, msg, { args }, "console", "error");
+      } catch { /* never throw from console interceptor */ }
     };
 
-    console.warn = function (...args: unknown[]) {
-      originalWarn!.apply(console, args);
-      const msg = args
-        .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
-        .join(" ");
-      captureErrorEvent(config, msg, { args }, "console", "warning");
+    const wrappedWarn = function (...args: unknown[]) {
+      try { originalWarn!.apply(console, args); } catch { /* never break console */ }
+      try {
+        const msg = args
+          .map((arg) => (typeof arg === "object" ? JSON.stringify(arg) : String(arg)))
+          .join(" ");
+        captureErrorEvent(config, msg, { args }, "console", "warning");
+      } catch { /* never throw from console interceptor */ }
     };
+
+    console.error = wrappedError;
+    console.warn = wrappedWarn;
+    (console as any)[PATCHED_SYMBOL] = true;
   }
 
   // Return cleanup function
   return () => {
-    window.onerror = null;
+    // Restore onerror — only remove ours, restore previous
+    if (window.onerror === handleWindowError || (window.onerror as any)?.__himetrica) {
+      window.onerror = previousOnError ?? null;
+    } else {
+      // Someone else replaced onerror after us, don't clobber theirs
+      window.onerror = null;
+    }
+
     window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+
     if (originalError) console.error = originalError;
     if (originalWarn) console.warn = originalWarn;
+    if (originalError || originalWarn) {
+      delete (console as any)[PATCHED_SYMBOL];
+    }
+
+    // Clean up module-level state to prevent memory leaks across instances
+    errorTimestamps = [];
+    for (const timer of dedupTimers) clearTimeout(timer);
+    dedupTimers.length = 0;
+    sentErrorHashes = new Set();
   };
 }
