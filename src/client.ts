@@ -190,6 +190,12 @@ export class HimetricaClient {
     if (eventName.length > 255) return;
     if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(eventName)) return;
 
+    // Flush any pending page view so the server creates the session with full
+    // device info before the custom event arrives. Without this, a fast
+    // track() call can reach the server before the debounced pageview,
+    // causing the event worker to create a bare session with 0 page views.
+    this.flushPendingPageView();
+
     const data = {
       visitorId: getVisitorId(this.config.cookieDomain),
       sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
