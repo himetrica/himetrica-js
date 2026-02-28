@@ -38,6 +38,7 @@ export class HimetricaClient {
   private destroyed = false;
   private firstPageViewSent = false;
   private pendingCustomEvents: Array<() => void> = [];
+  private cachedVisitorId: string | null = null;
   private visitorInfoCache: VisitorInfo | null = null;
   private visitorInfoPromise: Promise<VisitorInfo | null> | null = null;
 
@@ -144,7 +145,7 @@ export class HimetricaClient {
     const utmParams = getSessionUtmParams(this.config.cookieDomain);
 
     const data: Record<string, unknown> = {
-      visitorId: getVisitorId(this.config.cookieDomain),
+      visitorId: this.resolveVisitorId(),
       sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
       pageViewId: this.currentPageViewId,
       path: path ?? window.location.pathname,
@@ -208,7 +209,7 @@ export class HimetricaClient {
     this.flushPendingPageView();
 
     const data = {
-      visitorId: getVisitorId(this.config.cookieDomain),
+      visitorId: this.resolveVisitorId(),
       sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
       eventName,
       properties,
@@ -223,7 +224,7 @@ export class HimetricaClient {
   identify(data: { name?: string; email?: string; metadata?: Record<string, unknown> }): void {
     if (!isBrowser || this.disabled || this.destroyed) return;
 
-    const currentVisitorId = getVisitorId(this.config.cookieDomain);
+    const currentVisitorId = this.resolveVisitorId();
     const payload = {
       visitorId: currentVisitorId,
       name: data.name,
@@ -247,6 +248,7 @@ export class HimetricaClient {
         // update client storage so subsequent pageviews use the correct ID
         if (json?.visitorId && json.visitorId !== currentVisitorId) {
           setVisitorId(json.visitorId, cookieDomain);
+          this.cachedVisitorId = json.visitorId;
         }
       })
       .catch(() => {
@@ -265,7 +267,14 @@ export class HimetricaClient {
   }
 
   getVisitorId(): string {
-    return getVisitorId(this.config.cookieDomain);
+    return this.resolveVisitorId();
+  }
+
+  private resolveVisitorId(): string {
+    if (!this.cachedVisitorId) {
+      this.cachedVisitorId = getVisitorId(this.config.cookieDomain);
+    }
+    return this.cachedVisitorId;
   }
 
   async getVisitorInfo(): Promise<VisitorInfo | null> {
@@ -278,7 +287,7 @@ export class HimetricaClient {
 
   private async fetchVisitorInfo(): Promise<VisitorInfo | null> {
     try {
-      const visitorId = getVisitorId(this.config.cookieDomain);
+      const visitorId = this.resolveVisitorId();
       const url = `${this.config.apiUrl}/api/track/visitor-info?apiKey=${encodeURIComponent(this.config.apiKey)}&visitorId=${encodeURIComponent(visitorId)}`;
       const res = await fetch(url);
       if (!res.ok) return null;
