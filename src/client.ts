@@ -33,6 +33,7 @@ export class HimetricaClient {
   private isFirstPageView = true;
   private static readonly FIRST_PAGE_VIEW_DELAY = 300; // 300ms - catches redirects
   private static readonly PAGE_VIEW_MIN_DURATION = 1000; // 1 second
+  private hiddenAt: number = 0;
   private cleanupErrors: (() => void) | null = null;
   private disabled = false;
   private destroyed = false;
@@ -548,6 +549,23 @@ export class HimetricaClient {
     this.visibilityListener = () => {
       if (document.visibilityState === "hidden") {
         this.sendDuration();
+        this.hiddenAt = Date.now();
+      } else if (document.visibilityState === "visible" && this.hiddenAt > 0) {
+        const awayTime = Date.now() - this.hiddenAt;
+        this.hiddenAt = 0;
+        if (awayTime >= this.config.sessionTimeout) {
+          // Session expired — fire a real pageview to start a new session
+          this.lastTrackedPath = null;
+          this.trackPageView();
+        } else if (awayTime > 5 * 60 * 1000) {
+          // Away 5+ min but session still valid — lightweight heartbeat to
+          // refresh lastSeenAt without inflating pageview metrics
+          const url = `${this.config.apiUrl}/api/track/heartbeat?apiKey=${this.config.apiKey}`;
+          sendBeacon(url, {
+            visitorId: this.resolveVisitorId(),
+            sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
+          });
+        }
       }
     };
     document.addEventListener("visibilitychange", this.visibilityListener);
