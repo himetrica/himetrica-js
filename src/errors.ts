@@ -153,7 +153,7 @@ export function setupErrorHandlers(config: ResolvedConfig): () => void {
 
   // Store previous onerror so we can chain, not clobber
   const previousOnError = window.onerror;
-  const ourOnError = function (...args: Parameters<OnErrorEventHandler>) {
+  const ourOnError: OnErrorEventHandler = function (this: unknown, ...args: Parameters<NonNullable<OnErrorEventHandler>>) {
     try { handleWindowError(...args); } catch { /* never throw from error handler */ }
     if (typeof previousOnError === "function") {
       return (previousOnError as Function).apply(this, args);
