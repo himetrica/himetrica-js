@@ -36,6 +36,8 @@ export class HimetricaClient {
   private cleanupErrors: (() => void) | null = null;
   private disabled = false;
   private destroyed = false;
+  private firstPageViewSent = false;
+  private pendingCustomEvents: Array<() => void> = [];
   private visitorInfoCache: VisitorInfo | null = null;
   private visitorInfoPromise: Promise<VisitorInfo | null> | null = null;
 
@@ -180,6 +182,7 @@ export class HimetricaClient {
       // would return the previous page's title.
       data.title = document.title;
       sendPost(`${this.config.apiUrl}/api/track/event`, data, this.config.apiKey);
+      this.drainPendingEvents();
     }, delay);
   }
 
@@ -189,6 +192,14 @@ export class HimetricaClient {
     if (!eventName || typeof eventName !== "string") return;
     if (eventName.length > 255) return;
     if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(eventName)) return;
+
+    // Queue custom events until the first page view has been sent.
+    // This prevents the server from creating a bare session (pageCount=0)
+    // when track() fires before the delayed first page view.
+    if (!this.firstPageViewSent) {
+      this.pendingCustomEvents.push(() => this.track(eventName, properties));
+      return;
+    }
 
     // Flush any pending page view so the server creates the session with full
     // device info before the custom event arrives. Without this, a fast
@@ -289,9 +300,14 @@ export class HimetricaClient {
 
   destroy(): void {
     if (this.destroyed) return;
-    this.destroyed = true;
 
+    // flushPendingPageView sends the pending PV (if any) and drains queued
+    // custom events internally.  We do NOT call drainPendingEvents() separately
+    // here — if no PV was pending, draining would send orphaned custom events
+    // that arrive at the server before any pageview, recreating the bare-session bug.
     this.flushPendingPageView();
+
+    this.destroyed = true;
     this.cleanupErrors?.();
     this.cleanupErrors = null;
     this.sendDuration();
@@ -342,6 +358,15 @@ export class HimetricaClient {
     }
   }
 
+  private drainPendingEvents(): void {
+    if (!this.firstPageViewSent) {
+      this.firstPageViewSent = true;
+      const queued = this.pendingCustomEvents;
+      this.pendingCustomEvents = [];
+      for (const fn of queued) fn();
+    }
+  }
+
   private flushPendingPageView(): void {
     if (this.pendingPageViewTimer) {
       clearTimeout(this.pendingPageViewTimer);
@@ -351,6 +376,7 @@ export class HimetricaClient {
       this.pendingPageViewData.title = document.title;
       sendPost(`${this.config.apiUrl}/api/track/event`, this.pendingPageViewData, this.config.apiKey);
       this.pendingPageViewData = null;
+      this.drainPendingEvents();
     }
   }
 
