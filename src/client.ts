@@ -42,6 +42,10 @@ export class HimetricaClient {
   private cachedVisitorId: string | null = null;
   private visitorInfoCache: VisitorInfo | null = null;
   private visitorInfoPromise: Promise<VisitorInfo | null> | null = null;
+  private maxScrollDepth = 0;
+  private clickCount = 0;
+  private scrollListener: (() => void) | null = null;
+  private clickListener: (() => void) | null = null;
 
   // Bound listener references for proper removal
   private pageViewListener: ((path: string) => void) | null = null;
@@ -115,6 +119,23 @@ export class HimetricaClient {
       setupVitals(this.config);
     }
 
+    // Track max scroll depth per page
+    this.scrollListener = () => {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      const docHeight = Math.max(
+        document.body.scrollHeight, document.documentElement.scrollHeight,
+        document.body.offsetHeight, document.documentElement.offsetHeight,
+      );
+      const winHeight = window.innerHeight;
+      const depth = docHeight <= winHeight ? 100 : Math.min(100, Math.round(((scrollTop + winHeight) / docHeight) * 100));
+      if (depth > this.maxScrollDepth) this.maxScrollDepth = depth;
+    };
+    window.addEventListener("scroll", this.scrollListener, { passive: true });
+
+    // Track clicks per page
+    this.clickListener = () => { this.clickCount++; };
+    document.addEventListener("click", this.clickListener);
+
     if (this.config.autoTrackPageViews) {
       this.setupAutoPageViews();
     }
@@ -141,6 +162,8 @@ export class HimetricaClient {
 
     this.currentPageViewId = generatePageViewId();
     this.pageViewStartTime = Date.now();
+    this.maxScrollDepth = 0;
+    this.clickCount = 0;
 
     // Resolve UTM params: URL first, then cookie fallback (cross-subdomain persistence)
     const utmParams = getSessionUtmParams(this.config.cookieDomain);
@@ -322,6 +345,15 @@ export class HimetricaClient {
     this.cleanupErrors = null;
     this.sendDuration();
 
+    if (this.scrollListener) {
+      window.removeEventListener("scroll", this.scrollListener);
+      this.scrollListener = null;
+    }
+    if (this.clickListener) {
+      document.removeEventListener("click", this.clickListener);
+      this.clickListener = null;
+    }
+
     if (isBrowser) {
       const w = window as HimetricaWindow;
 
@@ -399,9 +431,13 @@ export class HimetricaClient {
     if (duration < 1 || duration > 3600) return;
 
     const url = `${this.config.apiUrl}/api/track/beacon?apiKey=${this.config.apiKey}`;
+    const scrollDepth = this.maxScrollDepth > 0 ? this.maxScrollDepth : undefined;
+    const clicks = this.clickCount > 0 ? this.clickCount : undefined;
     sendBeacon(url, {
       pageViewId: this.currentPageViewId,
       duration,
+      scrollDepth,
+      clickCount: clicks,
     });
 
     this.currentPageViewId = null;
