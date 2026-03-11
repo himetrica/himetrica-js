@@ -245,12 +245,13 @@ export class HimetricaClient {
     sendPost(`${this.config.apiUrl}/api/track/custom-event`, data, this.config.apiKey);
   }
 
-  identify(data: { name?: string; email?: string; metadata?: Record<string, unknown> }): void {
+  identify(data: { userId?: string; name?: string; email?: string; metadata?: Record<string, unknown> }): void {
     if (!isBrowser || this.disabled || this.destroyed) return;
 
     const currentVisitorId = this.resolveVisitorId();
     const payload = {
       visitorId: currentVisitorId,
+      userId: data.userId,
       name: data.name,
       email: data.email,
       metadata: data.metadata,
