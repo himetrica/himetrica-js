@@ -6,7 +6,7 @@ export function setupVitals(config: ResolvedConfig): void {
   if (typeof window === "undefined") return;
 
   function sendVital(metric: { name: string; value: number; rating: string }) {
-    const url = `${config.apiUrl}/api/track/vitals?apiKey=${config.apiKey}`;
+    const url = `${config.apiUrl}/api/t/vitals?apiKey=${config.apiKey}`;
     const data = {
       visitorId: getVisitorId(config.cookieDomain),
       sessionId: getSessionId(config.sessionTimeout, config.cookieDomain),
