@@ -72,7 +72,7 @@ function normalizeStack(stack?: string): string | undefined {
 }
 
 function sendError(config: ResolvedConfig, payload: ErrorPayload): void {
-  const url = `${config.apiUrl}/api/t/errors?apiKey=${config.apiKey}`;
+  const url = `${config.apiUrl}/api/t/er?apiKey=${config.apiKey}`;
   sendBeacon(url, payload);
 }
 

@@ -206,7 +206,7 @@ export class HimetricaClient {
       // asynchronously after pushState/replaceState, so capturing it earlier
       // would return the previous page's title.
       data.title = document.title;
-      sendPost(`${this.config.apiUrl}/api/t/event`, data, this.config.apiKey);
+      sendPost(`${this.config.apiUrl}/api/t/e`, data, this.config.apiKey);
       this.drainPendingEvents();
     }, delay);
   }
@@ -242,7 +242,7 @@ export class HimetricaClient {
       queryString: window.location.search,
     };
 
-    sendPost(`${this.config.apiUrl}/api/t/custom-event`, data, this.config.apiKey);
+    sendPost(`${this.config.apiUrl}/api/t/ce`, data, this.config.apiKey);
   }
 
   identify(data: { userId?: string; name?: string; email?: string; metadata?: Record<string, unknown> }): void {
@@ -417,7 +417,7 @@ export class HimetricaClient {
     }
     if (this.pendingPageViewData) {
       this.pendingPageViewData.title = document.title;
-      sendPost(`${this.config.apiUrl}/api/t/event`, this.pendingPageViewData, this.config.apiKey);
+      sendPost(`${this.config.apiUrl}/api/t/e`, this.pendingPageViewData, this.config.apiKey);
       this.pendingPageViewData = null;
       this.drainPendingEvents();
     }
@@ -431,7 +431,7 @@ export class HimetricaClient {
     const duration = Math.round((Date.now() - this.pageViewStartTime) / 1000);
     if (duration < 1 || duration > 3600) return;
 
-    const url = `${this.config.apiUrl}/api/t/beacon?apiKey=${this.config.apiKey}`;
+    const url = `${this.config.apiUrl}/api/t/b?apiKey=${this.config.apiKey}`;
     const scrollDepth = this.maxScrollDepth > 0 ? this.maxScrollDepth : undefined;
     const clicks = this.clickCount > 0 ? this.clickCount : undefined;
     sendBeacon(url, {
@@ -597,7 +597,7 @@ export class HimetricaClient {
         } else if (awayTime > 5 * 60 * 1000) {
           // Away 5+ min but session still valid — lightweight heartbeat to
           // refresh lastSeenAt without inflating pageview metrics
-          const url = `${this.config.apiUrl}/api/t/heartbeat?apiKey=${this.config.apiKey}`;
+          const url = `${this.config.apiUrl}/api/t/h?apiKey=${this.config.apiKey}`;
           sendBeacon(url, {
             visitorId: this.resolveVisitorId(),
             sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
