@@ -173,6 +173,7 @@ export class HimetricaClient {
       sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
       pageViewId: this.currentPageViewId,
       path: path ?? window.location.pathname,
+      hostname: window.location.hostname,
       title: document.title,
       referrer: this.getOriginalReferrer(),
       queryString: window.location.search,
@@ -238,6 +239,7 @@ export class HimetricaClient {
       eventName,
       properties,
       path: window.location.pathname,
+      hostname: window.location.hostname,
       title: document.title,
       queryString: window.location.search,
     };
