@@ -40,6 +40,8 @@ export class HimetricaClient {
   private firstPageViewSent = false;
   private pendingCustomEvents: Array<() => void> = [];
   private cachedVisitorId: string | null = null;
+  private identifyInFlight = false;
+  private pendingIdentify: { userId?: string; name?: string; email?: string; metadata?: Record<string, unknown> } | null = null;
   private visitorInfoCache: VisitorInfo | null = null;
   private visitorInfoPromise: Promise<VisitorInfo | null> | null = null;
   private maxScrollDepth = 0;
@@ -250,6 +252,21 @@ export class HimetricaClient {
   identify(data: { userId?: string; name?: string; email?: string; metadata?: Record<string, unknown> }): void {
     if (!isBrowser || this.disabled || this.destroyed) return;
 
+    // Debounce: if an identify is already in flight, queue this one.
+    // Prevents concurrent calls from all using a stale visitorId before
+    // the first response arrives with a fresh one (conflict resolution).
+    if (this.identifyInFlight) {
+      this.pendingIdentify = data;
+      return;
+    }
+
+    this.identifyInFlight = true;
+    // Safety timeout: if the fetch hangs, clear the flag after 10s
+    // so identify isn't permanently disabled for the page session
+    const identifyTimeout = setTimeout(() => {
+      this.identifyInFlight = false;
+    }, 10_000);
+
     const currentVisitorId = this.resolveVisitorId();
     const payload = {
       visitorId: currentVisitorId,
@@ -271,15 +288,31 @@ export class HimetricaClient {
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
-        // Server returns canonical visitorId when a merge occurred —
+        // Server returns canonical visitorId when a conflict/merge occurred —
         // update client storage so subsequent pageviews use the correct ID
         if (json?.visitorId && json.visitorId !== currentVisitorId) {
           setVisitorId(json.visitorId, cookieDomain);
           this.cachedVisitorId = json.visitorId;
+          // Update pending pageview if it hasn't been sent yet
+          if (this.pendingPageViewData) {
+            this.pendingPageViewData.visitorId = json.visitorId;
+          }
+          // Invalidate visitor info cache (identity changed)
+          this.visitorInfoCache = null;
         }
       })
       .catch(() => {
         // Silently fail
+      })
+      .finally(() => {
+        clearTimeout(identifyTimeout);
+        this.identifyInFlight = false;
+        // Process queued identify call with the (potentially updated) visitorId
+        if (this.pendingIdentify) {
+          const queued = this.pendingIdentify;
+          this.pendingIdentify = null;
+          this.identify(queued);
+        }
       });
   }
 
