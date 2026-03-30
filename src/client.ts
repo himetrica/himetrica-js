@@ -472,8 +472,10 @@ export class HimetricaClient {
           const referrerUrl = new URL(docReferrer);
           const refHost = referrerUrl.hostname;
           const cd = this.config.cookieDomain!;
+          // Normalize: ensure root has no leading dot, and dotRoot always has one
           const root = cd.startsWith(".") ? cd.slice(1) : cd;
-          if (refHost !== window.location.hostname && refHost !== root && !refHost.endsWith("." + root)) {
+          const dotRoot = "." + root;
+          if (refHost !== window.location.hostname && refHost !== root && !refHost.endsWith(dotRoot)) {
             externalReferrer = docReferrer;
           }
         }
