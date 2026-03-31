@@ -1,6 +1,6 @@
 import { type HimetricaConfig, type ResolvedConfig, resolveConfig } from "./config";
 import { sendPost, sendBeacon } from "./transport";
-import { getVisitorId, setVisitorId, getSessionId, generatePageViewId, getSessionUtmParams } from "./visitor";
+import { getVisitorId, setVisitorId, getSessionId, generatePageViewId, getSessionUtmParams, resetVisitor } from "./visitor";
 import { captureErrorEvent, captureMessageEvent, setupErrorHandlers } from "./errors";
 import { setupVitals } from "./vitals";
 
@@ -359,6 +359,33 @@ export class HimetricaClient {
     } finally {
       this.visitorInfoPromise = null;
     }
+  }
+
+  /** Reset all stored visitor/session data and start fresh. Call on logout before identifying a new user. */
+  reset(): void {
+    if (this.destroyed) return;
+
+    this.sendDuration();
+
+    // Cancel any pending pageview so it doesn't fire with the old visitorId
+    if (this.pendingPageViewTimer) {
+      clearTimeout(this.pendingPageViewTimer);
+      this.pendingPageViewTimer = null;
+      this.pendingPageViewData = null;
+    }
+
+    // Drop any queued identify — it belongs to the previous user
+    this.identifyInFlight = false;
+    this.pendingIdentify = null;
+
+    this.cachedVisitorId = resetVisitor(this.config.cookieDomain);
+    this.currentPageViewId = null;
+    this.pageViewStartTime = 0;
+    this.lastTrackedPath = null;
+    this.isFirstPageView = true;
+    this.firstPageViewSent = false;
+    this.pendingCustomEvents = [];
+    this.visitorInfoCache = null;
   }
 
   flush(): void {

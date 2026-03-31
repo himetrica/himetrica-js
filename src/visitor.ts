@@ -123,6 +123,36 @@ export function generatePageViewId(): string {
   return generateId();
 }
 
+/** Clear all stored visitor/session data and return a fresh visitor ID. */
+export function resetVisitor(cookieDomain?: string): string {
+  if (!isBrowser) return generateId();
+
+  // Clear cookies
+  if (cookieDomain) {
+    setCookie("hm_vid", "", 0, cookieDomain);
+    setCookie("hm_sid", "", 0, cookieDomain);
+    setCookie("hm_sts", "", 0, cookieDomain);
+    setCookie("hm_ref", "", 0, cookieDomain);
+    setCookie("hm_utm", "", 0, cookieDomain);
+  }
+
+  // Clear localStorage/sessionStorage
+  try { localStorage.removeItem("hm_visitor_id"); } catch {}
+  try { sessionStorage.removeItem("hm_session_id"); } catch {}
+  try { sessionStorage.removeItem("hm_session_timestamp"); } catch {}
+  try { sessionStorage.removeItem("hm_original_referrer"); } catch {}
+
+  // Generate and persist a fresh visitor ID
+  const newVisitorId = generateId();
+  if (cookieDomain) {
+    setCookie("hm_vid", newVisitorId, 365 * 24 * 60 * 60, cookieDomain);
+  } else {
+    safeSetItem(localStorage, "hm_visitor_id", newVisitorId);
+  }
+
+  return newVisitorId;
+}
+
 function clearAttributionCookies(cookieDomain: string): void {
   setCookie("hm_ref", "", 0, cookieDomain);
   setCookie("hm_utm", "", 0, cookieDomain);
