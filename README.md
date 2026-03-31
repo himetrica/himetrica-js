@@ -150,6 +150,7 @@ const hm = new HimetricaClient({
 | `captureError(error, context?)` | Capture an error |
 | `captureMessage(message, severity?, context?)` | Capture a message |
 | `getVisitorId()` | Get the current visitor ID |
+| `reset()` | Clear all stored data and start a fresh visitor. Call on logout before identifying a new user. |
 | `flush()` | Send any pending duration beacons |
 | `destroy()` | Clean up handlers and flush |
 
