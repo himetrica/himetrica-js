@@ -101,7 +101,10 @@ export class HimetricaClient {
 
     // Prevent multiple tracker instances (same guard as standalone tracker.js)
     const w = window as HimetricaWindow;
-    if (w.__himetricaInitialized) return;
+    if (w.__himetricaInitialized) {
+      this.disabled = true;
+      return;
+    }
     w.__himetricaInitialized = true;
 
     // Respect Do Not Track / Global Privacy Control
@@ -221,19 +224,21 @@ export class HimetricaClient {
     if (eventName.length > 255) return;
     if (!/^[a-zA-Z][a-zA-Z0-9_-]*$/.test(eventName)) return;
 
-    // Queue custom events until the first page view has been sent.
-    // This prevents the server from creating a bare session (pageCount=0)
-    // when track() fires before the delayed first page view.
-    if (!this.firstPageViewSent) {
-      this.pendingCustomEvents.push(() => this.track(eventName, properties));
-      return;
-    }
-
     // Flush any pending page view so the server creates the session with full
     // device info before the custom event arrives. Without this, a fast
     // track() call can reach the server before the debounced pageview,
     // causing the event worker to create a bare session with 0 page views.
+    // This also sets firstPageViewSent=true when a PV is pending, unblocking
+    // custom events that would otherwise queue until the debounce timer fires.
     this.flushPendingPageView();
+
+    // Queue custom events until the first page view has been sent.
+    // This prevents the server from creating a bare session (pageCount=0)
+    // when track() fires before any page view has been initiated at all.
+    if (!this.firstPageViewSent) {
+      this.pendingCustomEvents.push(() => this.track(eventName, properties));
+      return;
+    }
 
     const data = {
       visitorId: this.resolveVisitorId(),
