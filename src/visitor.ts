@@ -158,6 +158,24 @@ function clearAttributionCookies(cookieDomain: string): void {
   setCookie("hm_utm", "", 0, cookieDomain);
 }
 
+/**
+ * Clear the current session (but keep the visitor id) so the next event starts a
+ * fresh session. Used when the server signals an identity conflict and has issued a
+ * new visitorId — this person's visit should not continue on the previous session.
+ */
+export function clearSession(cookieDomain?: string): void {
+  if (!isBrowser) return;
+  if (cookieDomain) {
+    setCookie("hm_sid", "", 0, cookieDomain);
+    setCookie("hm_sts", "", 0, cookieDomain);
+    clearAttributionCookies(cookieDomain);
+  } else {
+    try { sessionStorage.removeItem("hm_session_id"); } catch {}
+    try { sessionStorage.removeItem("hm_session_timestamp"); } catch {}
+    try { sessionStorage.removeItem("hm_original_referrer"); } catch {}
+  }
+}
+
 function setSessionCookie(name: string, value: string, domain: string): void {
   if (!isBrowser) return;
   try {
