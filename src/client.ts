@@ -1,6 +1,6 @@
 import { type HimetricaConfig, type ResolvedConfig, resolveConfig } from "./config";
 import { sendPost, sendBeacon } from "./transport";
-import { getVisitorId, setVisitorId, getSessionId, generatePageViewId, getSessionUtmParams, resetVisitor } from "./visitor";
+import { getVisitorId, setVisitorId, getSessionId, generatePageViewId, getSessionUtmParams, resetVisitor, clearSession } from "./visitor";
 import { captureErrorEvent, captureMessageEvent, setupErrorHandlers } from "./errors";
 import { setupVitals } from "./vitals";
 
@@ -298,12 +298,21 @@ export class HimetricaClient {
         if (json?.visitorId && json.visitorId !== currentVisitorId) {
           setVisitorId(json.visitorId, cookieDomain);
           this.cachedVisitorId = json.visitorId;
-          // Update pending pageview if it hasn't been sent yet
-          if (this.pendingPageViewData) {
+          // Update a not-yet-sent pageview to the new id — EXCEPT on a split (resetSession):
+          // that pending pageview belongs to the PREVIOUS identity's session, so sending it
+          // with the new visitorId + the old sessionId would make the server move that whole
+          // session to the new visitor (pageview.worker reassigns on visitor mismatch),
+          // breaking forward-only. Leave it on the old id so it stays with the old visitor.
+          if (this.pendingPageViewData && !json.resetSession) {
             this.pendingPageViewData.visitorId = json.visitorId;
           }
           // Invalidate visitor info cache (identity changed)
           this.visitorInfoCache = null;
+        }
+        // On an identity conflict the server also asks us to start a fresh session,
+        // so this person's visit splits cleanly off the previous identity's session.
+        if (json?.resetSession) {
+          clearSession(cookieDomain);
         }
       })
       .catch(() => {
