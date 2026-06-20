@@ -37,6 +37,9 @@ export class HimetricaClient {
   private cleanupErrors: (() => void) | null = null;
   private disabled = false;
   private destroyed = false;
+  private metaEnabled = false; // resolved from /config — the project's actual Meta CAPI state
+  private cookieDomain?: string; // resolved from /config (server), like the standalone tracker
+  private respectDNT = false; // resolved from /config (server); matches the standalone default
   private firstPageViewSent = false;
   private pendingCustomEvents: Array<() => void> = [];
   private cachedVisitorId: string | null = null;
@@ -72,9 +75,7 @@ export class HimetricaClient {
         autoTrackErrors: false,
         interceptConsole: false,
         trackVitals: false,
-        respectDoNotTrack: true,
         sessionTimeout: 1800000,
-        metaCapi: false,
       };
       return;
     }
@@ -108,43 +109,80 @@ export class HimetricaClient {
     }
     w.__himetricaInitialized = true;
 
-    // Respect Do Not Track / Global Privacy Control
-    if (this.config.respectDoNotTrack) {
-      const dnt = navigator.doNotTrack === "1";
-      const gpc = !!(navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl;
-      if (dnt || gpc) {
-        return;
+    // Everything below depends on the project config (DNT preference, cookie domain, Meta
+    // CAPI gate) — so, exactly like the standalone tracker, fetch /config FIRST, then run the
+    // DNT check and wire up tracking + the first pageview.
+    this.fetchConfig().then(() => {
+      if (this.destroyed) return;
+
+      // Respect Do Not Track / Global Privacy Control (project setting, from /config)
+      if (this.respectDNT) {
+        const dnt = navigator.doNotTrack === "1";
+        const gpc = !!(navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl;
+        if (dnt || gpc) return;
       }
-    }
 
-    if (this.config.autoTrackErrors) {
-      this.cleanupErrors = setupErrorHandlers(this.config);
-    }
+      if (this.config.autoTrackErrors) {
+        this.cleanupErrors = setupErrorHandlers(this.config);
+      }
+      if (this.config.trackVitals) {
+        setupVitals(this.config);
+      }
 
-    if (this.config.trackVitals) {
-      setupVitals(this.config);
-    }
+      // Track max scroll depth per page
+      this.scrollListener = () => {
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const docHeight = Math.max(
+          document.body.scrollHeight, document.documentElement.scrollHeight,
+          document.body.offsetHeight, document.documentElement.offsetHeight,
+        );
+        const winHeight = window.innerHeight;
+        const depth = docHeight <= winHeight ? 100 : Math.min(100, Math.round(((scrollTop + winHeight) / docHeight) * 100));
+        if (depth > this.maxScrollDepth) this.maxScrollDepth = depth;
+      };
+      window.addEventListener("scroll", this.scrollListener, { passive: true });
 
-    // Track max scroll depth per page
-    this.scrollListener = () => {
-      const scrollTop = window.scrollY || document.documentElement.scrollTop;
-      const docHeight = Math.max(
-        document.body.scrollHeight, document.documentElement.scrollHeight,
-        document.body.offsetHeight, document.documentElement.offsetHeight,
-      );
-      const winHeight = window.innerHeight;
-      const depth = docHeight <= winHeight ? 100 : Math.min(100, Math.round(((scrollTop + winHeight) / docHeight) * 100));
-      if (depth > this.maxScrollDepth) this.maxScrollDepth = depth;
-    };
-    window.addEventListener("scroll", this.scrollListener, { passive: true });
+      // Track clicks per page
+      this.clickListener = () => { this.clickCount++; };
+      document.addEventListener("click", this.clickListener);
 
-    // Track clicks per page
-    this.clickListener = () => { this.clickCount++; };
-    document.addEventListener("click", this.clickListener);
+      if (this.config.autoTrackPageViews) this.setupAutoPageViews();
+    });
+  }
 
-    if (this.config.autoTrackPageViews) {
-      this.setupAutoPageViews();
-    }
+  // Fetch the project config (cookieDomain, DNT preference, Meta CAPI gate) from the server —
+  // identical to the standalone tracker. Cached 1h in localStorage (same key/shape).
+  private fetchConfig(): Promise<void> {
+    try {
+      const raw = localStorage.getItem("hm_config");
+      if (raw) {
+        const c = JSON.parse(raw) as { cookieDomain?: string | null; dnt?: boolean; meta?: boolean; fetchedAt?: number };
+        if (typeof c.fetchedAt === "number" && Date.now() - c.fetchedAt < 60 * 60 * 1000) {
+          this.cookieDomain = c.cookieDomain ?? this.config.cookieDomain;
+          this.respectDNT = !!c.dnt;
+          this.metaEnabled = !!c.meta;
+          return Promise.resolve();
+        }
+      }
+    } catch { /* ignore */ }
+
+    return fetch(`${this.config.apiUrl}/api/t/c?apiKey=${this.config.apiKey}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        this.cookieDomain = data.cookieDomain ?? this.config.cookieDomain;
+        this.respectDNT = !!data.dnt;
+        this.metaEnabled = !!data.metaCapi;
+        try {
+          localStorage.setItem("hm_config", JSON.stringify({
+            cookieDomain: data.cookieDomain ?? null,
+            dnt: this.respectDNT,
+            meta: this.metaEnabled,
+            fetchedAt: Date.now(),
+          }));
+        } catch { /* ignore */ }
+      })
+      .catch(() => { /* silently fail — keep constructor defaults */ });
   }
 
   trackPageView(path?: string): void {
@@ -172,11 +210,11 @@ export class HimetricaClient {
     this.clickCount = 0;
 
     // Resolve UTM params: URL first, then cookie fallback (cross-subdomain persistence)
-    const utmParams = getSessionUtmParams(this.config.cookieDomain);
+    const utmParams = getSessionUtmParams(this.cookieDomain);
 
     const data: Record<string, unknown> = {
       visitorId: this.resolveVisitorId(),
-      sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
+      sessionId: getSessionId(this.config.sessionTimeout, this.cookieDomain),
       pageViewId: this.currentPageViewId,
       path: path ?? window.location.pathname,
       hostname: window.location.hostname,
@@ -199,11 +237,11 @@ export class HimetricaClient {
     }
 
     // Meta click/browser identifiers for Conversions API forwarding (gated on metaCapi).
-    const fbp = getOrCreateFbp(this.config.cookieDomain, this.config.metaCapi);
+    const fbp = getOrCreateFbp(this.cookieDomain, this.metaEnabled);
     if (fbp) data.fbp = fbp;
-    const fbc = getOrCreateFbc(this.config.cookieDomain, this.config.metaCapi);
+    const fbc = getOrCreateFbc(this.cookieDomain, this.metaEnabled);
     if (fbc) data.fbc = fbc;
-    if (this.config.metaCapi) {
+    if (this.metaEnabled) {
       const fbclid = getFbclidFromUrl();
       if (fbclid) data.fbclid = fbclid;
     }
@@ -253,7 +291,7 @@ export class HimetricaClient {
 
     const data = {
       visitorId: this.resolveVisitorId(),
-      sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
+      sessionId: getSessionId(this.config.sessionTimeout, this.cookieDomain),
       eventName,
       properties,
       path: window.location.pathname,
@@ -261,9 +299,9 @@ export class HimetricaClient {
       title: document.title,
       queryString: window.location.search,
       // Meta click/browser identifiers (server forwards conversions to the CAPI; gated on metaCapi).
-      fbp: getOrCreateFbp(this.config.cookieDomain, this.config.metaCapi),
-      fbc: getOrCreateFbc(this.config.cookieDomain, this.config.metaCapi),
-      fbclid: this.config.metaCapi ? getFbclidFromUrl() : null,
+      fbp: getOrCreateFbp(this.cookieDomain, this.metaEnabled),
+      fbc: getOrCreateFbc(this.cookieDomain, this.metaEnabled),
+      fbclid: this.metaEnabled ? getFbclidFromUrl() : null,
     };
 
     sendPost(`${this.config.apiUrl}/api/t/ce`, data, this.config.apiKey);
@@ -296,7 +334,7 @@ export class HimetricaClient {
       metadata: data.metadata,
     };
 
-    const cookieDomain = this.config.cookieDomain;
+    const cookieDomain = this.cookieDomain;
     fetch(`${this.config.apiUrl}/api/t/identify`, {
       method: "POST",
       headers: {
@@ -361,7 +399,7 @@ export class HimetricaClient {
 
   private resolveVisitorId(): string {
     if (!this.cachedVisitorId) {
-      this.cachedVisitorId = getVisitorId(this.config.cookieDomain);
+      this.cachedVisitorId = getVisitorId(this.cookieDomain);
     }
     return this.cachedVisitorId;
   }
@@ -407,7 +445,7 @@ export class HimetricaClient {
     this.identifyInFlight = false;
     this.pendingIdentify = null;
 
-    this.cachedVisitorId = resetVisitor(this.config.cookieDomain);
+    this.cachedVisitorId = resetVisitor(this.cookieDomain);
     this.currentPageViewId = null;
     this.pageViewStartTime = 0;
     this.lastTrackedPath = null;
@@ -545,7 +583,7 @@ export class HimetricaClient {
   }
 
   private _getOriginalReferrerUnsafe(): string {
-    if (this.config.cookieDomain) {
+    if (this.cookieDomain) {
       // Cookie mode: use hm_ref cookie shared across subdomains
       const match = document.cookie.match(/(?:^|; )hm_ref=([^;]*)/);
       const storedReferrer = match ? decodeURIComponent(match[1]) : null;
@@ -560,7 +598,7 @@ export class HimetricaClient {
         if (docReferrer) {
           const referrerUrl = new URL(docReferrer);
           const refHost = referrerUrl.hostname;
-          const cd = this.config.cookieDomain!;
+          const cd = this.cookieDomain!;
           // Normalize: ensure root has no leading dot, and dotRoot always has one
           const root = cd.startsWith(".") ? cd.slice(1) : cd;
           const dotRoot = "." + root;
@@ -572,7 +610,7 @@ export class HimetricaClient {
         // Invalid URL, ignore
       }
 
-      let cookie = `hm_ref=${encodeURIComponent(externalReferrer)}; path=/; SameSite=Lax; domain=${this.config.cookieDomain}`;
+      let cookie = `hm_ref=${encodeURIComponent(externalReferrer)}; path=/; SameSite=Lax; domain=${this.cookieDomain}`;
       if (location.protocol === "https:") {
         cookie += "; Secure";
       }
@@ -693,7 +731,7 @@ export class HimetricaClient {
           const url = `${this.config.apiUrl}/api/t/h?apiKey=${this.config.apiKey}`;
           sendBeacon(url, {
             visitorId: this.resolveVisitorId(),
-            sessionId: getSessionId(this.config.sessionTimeout, this.config.cookieDomain),
+            sessionId: getSessionId(this.config.sessionTimeout, this.cookieDomain),
           });
         }
       }
