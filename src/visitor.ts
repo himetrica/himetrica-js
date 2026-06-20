@@ -50,21 +50,26 @@ export function getFbclidFromUrl(): string | null {
   return new URLSearchParams(window.location.search).get("fbclid");
 }
 
-/** Read an existing _fbp (Pixel-set or ours), else generate one. Format fb.1.<ts>.<rand>. */
-export function getOrCreateFbp(cookieDomain?: string): string | null {
+/**
+ * Read an existing _fbp (Pixel-set or ours) — always. Only MINT a new one when
+ * metaEnabled (the integrator opted into Meta CAPI), so non-Meta apps get no FB cookie.
+ */
+export function getOrCreateFbp(cookieDomain?: string, metaEnabled?: boolean): string | null {
   if (!isBrowser) return null;
   const existing = getCookie("_fbp");
   if (existing) return existing;
+  if (!metaEnabled) return null;
   const value = `fb.1.${Date.now()}.${Math.floor(Math.random() * 1e10)}`;
   setCookie("_fbp", value, 90 * 24 * 60 * 60, cookieDomain || "");
   return value;
 }
 
-/** Read an existing _fbc, else build one from the URL fbclid (only when a click id is present). */
-export function getOrCreateFbc(cookieDomain?: string): string | null {
+/** Read an existing _fbc; only MINT from the URL fbclid when metaEnabled and a click id is present. */
+export function getOrCreateFbc(cookieDomain?: string, metaEnabled?: boolean): string | null {
   if (!isBrowser) return null;
   const existing = getCookie("_fbc");
   if (existing) return existing;
+  if (!metaEnabled) return null;
   const fbclid = getFbclidFromUrl();
   if (!fbclid) return null;
   const value = `fb.1.${Date.now()}.${fbclid}`;

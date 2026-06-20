@@ -74,6 +74,7 @@ export class HimetricaClient {
         trackVitals: false,
         respectDoNotTrack: true,
         sessionTimeout: 1800000,
+        metaCapi: false,
       };
       return;
     }
@@ -197,13 +198,15 @@ export class HimetricaClient {
       };
     }
 
-    // Meta click/browser identifiers for Conversions API forwarding.
-    const fbp = getOrCreateFbp(this.config.cookieDomain);
+    // Meta click/browser identifiers for Conversions API forwarding (gated on metaCapi).
+    const fbp = getOrCreateFbp(this.config.cookieDomain, this.config.metaCapi);
     if (fbp) data.fbp = fbp;
-    const fbc = getOrCreateFbc(this.config.cookieDomain);
+    const fbc = getOrCreateFbc(this.config.cookieDomain, this.config.metaCapi);
     if (fbc) data.fbc = fbc;
-    const fbclid = getFbclidFromUrl();
-    if (fbclid) data.fbclid = fbclid;
+    if (this.config.metaCapi) {
+      const fbclid = getFbclidFromUrl();
+      if (fbclid) data.fbclid = fbclid;
+    }
 
     // First pageview uses short delay to catch redirect chains;
     // subsequent ones use longer delay to ensure user actually viewed the page
@@ -257,10 +260,10 @@ export class HimetricaClient {
       hostname: window.location.hostname,
       title: document.title,
       queryString: window.location.search,
-      // Meta click/browser identifiers (server forwards conversions to the CAPI).
-      fbp: getOrCreateFbp(this.config.cookieDomain),
-      fbc: getOrCreateFbc(this.config.cookieDomain),
-      fbclid: getFbclidFromUrl(),
+      // Meta click/browser identifiers (server forwards conversions to the CAPI; gated on metaCapi).
+      fbp: getOrCreateFbp(this.config.cookieDomain, this.config.metaCapi),
+      fbc: getOrCreateFbc(this.config.cookieDomain, this.config.metaCapi),
+      fbclid: this.config.metaCapi ? getFbclidFromUrl() : null,
     };
 
     sendPost(`${this.config.apiUrl}/api/t/ce`, data, this.config.apiKey);
