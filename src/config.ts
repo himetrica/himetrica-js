@@ -5,11 +5,8 @@ export interface HimetricaConfig {
   autoTrackErrors?: boolean;
   interceptConsole?: boolean;
   trackVitals?: boolean;
-  respectDoNotTrack?: boolean;
   sessionTimeout?: number;
   cookieDomain?: string;
-  /** Capture Meta (Facebook) _fbp/_fbc identifiers for Conversions API forwarding. Default false. */
-  metaCapi?: boolean;
 }
 
 export interface ResolvedConfig {
@@ -19,10 +16,8 @@ export interface ResolvedConfig {
   autoTrackErrors: boolean;
   interceptConsole: boolean;
   trackVitals: boolean;
-  respectDoNotTrack: boolean;
   sessionTimeout: number;
   cookieDomain?: string;
-  metaCapi: boolean;
 }
 
 export function resolveConfig(config: HimetricaConfig): ResolvedConfig {
@@ -42,9 +37,7 @@ export function resolveConfig(config: HimetricaConfig): ResolvedConfig {
     autoTrackErrors: config.autoTrackErrors ?? true,
     interceptConsole: config.interceptConsole ?? false,
     trackVitals: config.trackVitals ?? false,
-    respectDoNotTrack: config.respectDoNotTrack ?? true,
     sessionTimeout,
     cookieDomain: config.cookieDomain,
-    metaCapi: config.metaCapi ?? false,
   };
 }
