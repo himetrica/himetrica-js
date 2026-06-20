@@ -1,6 +1,6 @@
 # @himetrica/tracker-js
 
-A lightweight, privacy-focused analytics SDK for web applications. Supports vanilla JavaScript, React, and any framework with ES module or CommonJS imports.
+A lightweight analytics SDK for web applications. Supports vanilla JavaScript, React, and any framework with ES module or CommonJS imports.
 
 ## Features
 
@@ -11,7 +11,7 @@ A lightweight, privacy-focused analytics SDK for web applications. Supports vani
 - **Web Vitals** - Track Core Web Vitals (LCP, CLS, INP, FCP, TTFB)
 - **Session management** - Automatic session handling with configurable timeout
 - **SSR-safe** - All browser APIs guarded for server-side rendering
-- **Privacy-first** - Respects Do Not Track by default
+- **Do Not Track support** - Respects the browser Do Not Track setting by default
 - **Dual format** - Ships ESM and CJS with full TypeScript declarations
 - **React integration** - Provider, ErrorBoundary, and hooks included
 
@@ -204,7 +204,7 @@ All browser APIs are guarded with `typeof window !== "undefined"` checks. The cl
 
 - **Do Not Track**: Respects the browser's DNT setting by default. Disable with `respectDoNotTrack: false`.
 - **Referrer tracking**: Only captures external referrers (different domain), once per session.
-- **Cookie-free by default**: Uses `localStorage` and `sessionStorage`. Optional first-party cookies for cross-subdomain tracking via `cookieDomain` config.
+- **Storage**: Uses `localStorage` and `sessionStorage` by default. Optional first-party cookies for cross-subdomain tracking via `cookieDomain` config.
 
 ## License
 

@@ -8,6 +8,8 @@ export interface HimetricaConfig {
   respectDoNotTrack?: boolean;
   sessionTimeout?: number;
   cookieDomain?: string;
+  /** Capture Meta (Facebook) _fbp/_fbc identifiers for Conversions API forwarding. Default false. */
+  metaCapi?: boolean;
 }
 
 export interface ResolvedConfig {
@@ -20,6 +22,7 @@ export interface ResolvedConfig {
   respectDoNotTrack: boolean;
   sessionTimeout: number;
   cookieDomain?: string;
+  metaCapi: boolean;
 }
 
 export function resolveConfig(config: HimetricaConfig): ResolvedConfig {
@@ -42,5 +45,6 @@ export function resolveConfig(config: HimetricaConfig): ResolvedConfig {
     respectDoNotTrack: config.respectDoNotTrack ?? true,
     sessionTimeout,
     cookieDomain: config.cookieDomain,
+    metaCapi: config.metaCapi ?? false,
   };
 }
