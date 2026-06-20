@@ -1,6 +1,6 @@
 import { type HimetricaConfig, type ResolvedConfig, resolveConfig } from "./config";
 import { sendPost, sendBeacon } from "./transport";
-import { getVisitorId, setVisitorId, getSessionId, generatePageViewId, getSessionUtmParams, resetVisitor, clearSession } from "./visitor";
+import { getVisitorId, setVisitorId, getSessionId, generatePageViewId, getSessionUtmParams, resetVisitor, clearSession, getOrCreateFbp, getOrCreateFbc, getFbclidFromUrl } from "./visitor";
 import { captureErrorEvent, captureMessageEvent, setupErrorHandlers } from "./errors";
 import { setupVitals } from "./vitals";
 
@@ -197,6 +197,14 @@ export class HimetricaClient {
       };
     }
 
+    // Meta click/browser identifiers for Conversions API forwarding.
+    const fbp = getOrCreateFbp(this.config.cookieDomain);
+    if (fbp) data.fbp = fbp;
+    const fbc = getOrCreateFbc(this.config.cookieDomain);
+    if (fbc) data.fbc = fbc;
+    const fbclid = getFbclidFromUrl();
+    if (fbclid) data.fbclid = fbclid;
+
     // First pageview uses short delay to catch redirect chains;
     // subsequent ones use longer delay to ensure user actually viewed the page
     const delay = this.isFirstPageView
@@ -249,6 +257,10 @@ export class HimetricaClient {
       hostname: window.location.hostname,
       title: document.title,
       queryString: window.location.search,
+      // Meta click/browser identifiers (server forwards conversions to the CAPI).
+      fbp: getOrCreateFbp(this.config.cookieDomain),
+      fbc: getOrCreateFbc(this.config.cookieDomain),
+      fbclid: getFbclidFromUrl(),
     };
 
     sendPost(`${this.config.apiUrl}/api/t/ce`, data, this.config.apiKey);
