@@ -335,7 +335,10 @@ export class HimetricaClient {
     };
 
     const cookieDomain = this.cookieDomain;
-    fetch(`${this.config.apiUrl}/api/t/identify`, {
+    // "/i" (not "/identify"): ad/privacy blockers match the literal "identify" path and
+    // silently drop the request, leaving the visitor anonymous. Server still accepts the
+    // legacy "/identify" too, but new builds must use the unblockable short alias.
+    fetch(`${this.config.apiUrl}/api/t/i`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
