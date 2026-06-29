@@ -43,6 +43,11 @@ export class HimetricaClient {
   private firstPageViewSent = false;
   private pendingCustomEvents: Array<() => void> = [];
   private cachedVisitorId: string | null = null;
+  // Identity to attach to the next pageview/custom event as a FALLBACK delivery when
+  // the dedicated /i identify call is dropped (ad/privacy blocker, network). Set in
+  // identify(); cleared on the first successful delivery (via /i, /e, or /ce). null
+  // in steady state, so normal traffic never carries identity on the event channel.
+  private identityForEvents: { userId?: string; name?: string; email?: string } | null = null;
   private identifyInFlight = false;
   private pendingIdentify: { userId?: string; name?: string; email?: string; metadata?: Record<string, unknown> } | null = null;
   private visitorInfoCache: VisitorInfo | null = null;
@@ -246,6 +251,9 @@ export class HimetricaClient {
       if (fbclid) data.fbclid = fbclid;
     }
 
+    // Fallback identity delivery (see identify()) — only set while a /i is unconfirmed.
+    if (this.identityForEvents) data.identify = this.identityForEvents;
+
     // First pageview uses short delay to catch redirect chains;
     // subsequent ones use longer delay to ensure user actually viewed the page
     const delay = this.isFirstPageView
@@ -261,7 +269,7 @@ export class HimetricaClient {
       // asynchronously after pushState/replaceState, so capturing it earlier
       // would return the previous page's title.
       data.title = document.title;
-      sendPost(`${this.config.apiUrl}/api/t/e`, data, this.config.apiKey);
+      this.postEvent(`${this.config.apiUrl}/api/t/e`, data);
       this.drainPendingEvents();
     }, delay);
   }
@@ -289,7 +297,7 @@ export class HimetricaClient {
       return;
     }
 
-    const data = {
+    const data: Record<string, unknown> = {
       visitorId: this.resolveVisitorId(),
       sessionId: getSessionId(this.config.sessionTimeout, this.cookieDomain),
       eventName,
@@ -303,12 +311,20 @@ export class HimetricaClient {
       fbc: getOrCreateFbc(this.cookieDomain, this.metaEnabled),
       fbclid: this.metaEnabled ? getFbclidFromUrl() : null,
     };
+    // Fallback identity delivery (see identify()).
+    if (this.identityForEvents) data.identify = this.identityForEvents;
 
-    sendPost(`${this.config.apiUrl}/api/t/ce`, data, this.config.apiKey);
+    this.postEvent(`${this.config.apiUrl}/api/t/ce`, data);
   }
 
   identify(data: { userId?: string; name?: string; email?: string; metadata?: Record<string, unknown> }): void {
     if (!isBrowser || this.disabled || this.destroyed) return;
+
+    // Arm the FALLBACK: attach this identity to the next pageview/custom event until
+    // it lands, so it still reaches the server if THIS /i call is dropped (ad/privacy
+    // blocker, network). Cleared on the first successful delivery — on /i success
+    // below, or in postEvent() when an identity-carrying event returns 2xx.
+    this.identityForEvents = { userId: data.userId, name: data.name, email: data.email };
 
     // Debounce: if an identify is already in flight, queue this one.
     // Prevents concurrent calls from all using a stale visitorId before
@@ -347,7 +363,12 @@ export class HimetricaClient {
       body: JSON.stringify(payload),
       keepalive: true,
     })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!res.ok) return null;
+        // /i landed — stop the event-channel fallback for this identity.
+        this.identityForEvents = null;
+        return res.json();
+      })
       .then((json) => {
         // Server returns canonical visitorId when a conflict/merge occurred —
         // update client storage so subsequent pageviews use the correct ID
@@ -444,9 +465,12 @@ export class HimetricaClient {
       this.pendingPageViewData = null;
     }
 
-    // Drop any queued identify — it belongs to the previous user
+    // Drop any queued identify AND the event-channel fallback — both belong to the
+    // previous user; leaving the fallback armed would stamp their email onto the
+    // fresh post-logout anonymous visitor and merge it back into them.
     this.identifyInFlight = false;
     this.pendingIdentify = null;
+    this.identityForEvents = null;
 
     this.cachedVisitorId = resetVisitor(this.cookieDomain);
     this.currentPageViewId = null;
@@ -549,10 +573,25 @@ export class HimetricaClient {
     }
     if (this.pendingPageViewData) {
       this.pendingPageViewData.title = document.title;
-      sendPost(`${this.config.apiUrl}/api/t/e`, this.pendingPageViewData, this.config.apiKey);
+      this.postEvent(`${this.config.apiUrl}/api/t/e`, this.pendingPageViewData);
       this.pendingPageViewData = null;
       this.drainPendingEvents();
     }
+  }
+
+  // POST an event, and once an identity-carrying event is acknowledged (2xx), clear
+  // the fallback so we stop attaching identity to subsequent events. The reference
+  // guard avoids clearing a NEWER identity set by an identify() that ran in between.
+  private postEvent(url: string, data: Record<string, unknown>): void {
+    // Capture the identity THIS event carried, then clear only if it's still the
+    // current one — a fresh identify() in between sets a new object, so === fails and
+    // the newer identity stays armed.
+    const carried = (data.identify ?? null) as { userId?: string; name?: string; email?: string } | null;
+    void sendPost(url, data, this.config.apiKey).then((ok) => {
+      if (ok && carried && this.identityForEvents === carried) {
+        this.identityForEvents = null;
+      }
+    });
   }
 
   // Private methods

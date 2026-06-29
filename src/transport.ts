@@ -34,15 +34,18 @@ export function sendBeacon(url: string, data: unknown): void {
   }
 }
 
+// Returns whether the POST reached the server with a 2xx. Callers that don't care
+// (most) can ignore it; the identity-fallback path awaits it to know the identity
+// landed so it can stop re-attaching it to subsequent events.
 export function sendPost(
   url: string,
   data: unknown,
   apiKey: string
-): void {
-  if (!isBrowser) return;
+): Promise<boolean> {
+  if (!isBrowser) return Promise.resolve(false);
 
   try {
-    fetch(url, {
+    return fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -50,8 +53,11 @@ export function sendPost(
       },
       body: JSON.stringify(data),
       keepalive: true,
-    }).catch(() => {});
+    })
+      .then((res) => res.ok)
+      .catch(() => false);
   } catch {
     // JSON.stringify can throw on circular refs — never propagate
+    return Promise.resolve(false);
   }
 }
